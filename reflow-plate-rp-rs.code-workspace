@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../simplestaticstring-rust"
+		}
+	],
+	"settings": {
+		"rust-analyzer.cargo.target": "thumbv6m-none-eabi",
+		"rust-analyzer.checkOnSave.allTargets": false,
+	}
+}
