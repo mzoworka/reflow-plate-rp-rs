@@ -3,7 +3,7 @@ use embassy_time::Timer;
 use simplestaticstring::{format_static, StaticString};
 use core::fmt::Write;
 
-use crate::{storage::{Storage, SyncStorageStateEnum}, display::SyncDisplayStateEnum, heater::SyncHeatStateEnum, tools::SyncStateChannelSender};
+use crate::{temperature, storage::{Storage, SyncStorageStateEnum}, display::SyncDisplayStateEnum, heater::SyncHeatStateEnum, tools::SyncStateChannelSender};
 
 //traits
 trait MenuItemTextTrait {
@@ -47,16 +47,16 @@ impl MenuItemActionTrait for MenuItemTargetTempStatic {
     fn call(&self, btn: u8, amount: u8, menu: &mut Menu) -> MenuItemAction {
         match btn {
             1 => {
-                menu.profile.0 = 0;
-                menu.profile.1 = true;
                 menu.target_temp.0 += amount as u16;
                 menu.target_temp.1 = true;
                 MenuItemAction::None
             },
-            2 => MenuItemAction::Back,
-            3 => {
-                menu.profile.0 = 0;
+            2 => {
+                menu.profile.0 = temperature::TemperatureProfileEnum::Static;
                 menu.profile.1 = true;
+                MenuItemAction::Back
+            },
+            3 => {
                 menu.target_temp.0 -= amount as u16;
                 menu.target_temp.1 = true;
                 MenuItemAction::None
@@ -78,16 +78,16 @@ impl MenuItemActionTrait for MenuItemTargetTempProfileA {
     fn call(&self, btn: u8, amount: u8, menu: &mut Menu) -> MenuItemAction {
         match btn {
             1 => {
-                menu.profile.0 = 1;
-                menu.profile.1 = true;
                 menu.target_temp.0 += amount as u16;
                 menu.target_temp.1 = true;
                 MenuItemAction::None
             },
-            2 => MenuItemAction::Back,
-            3 => {
-                menu.profile.0 = 1;
+            2 => {
+                menu.profile.0 = temperature::TemperatureProfileEnum::ProfileA;
                 menu.profile.1 = true;
+                MenuItemAction::Back
+            },
+            3 => {
                 menu.target_temp.0 -= amount as u16;
                 menu.target_temp.1 = true;
                 MenuItemAction::None
@@ -257,7 +257,7 @@ pub(crate) struct Menu{
     menu: &'static MenuType,
     position: u8,
     target_temp: (u16, bool),
-    profile: (u8, bool),
+    profile: (temperature::TemperatureProfileEnum, bool),
     pid: (bool, bool),
     pid_p: (f32, bool),
     pid_i: (f32, bool),
@@ -270,7 +270,7 @@ impl Default for Menu {
             menu: &MENU_TOP,
             position: 0u8,
             target_temp: (0, false),
-            profile: (0, false),
+            profile: (temperature::TemperatureProfileEnum::Static, false),
             pid: (false, false),
             pid_p: (0.0, false),
             pid_i: (0.0, false),
@@ -369,7 +369,7 @@ impl Menu {
     async fn send_updates(&mut self, display_tx: SyncStateChannelSender<'_, SyncDisplayStateEnum>, heat_tx: SyncStateChannelSender<'_, SyncHeatStateEnum>, storage_tx: SyncStateChannelSender<'_, SyncStorageStateEnum>) {
         if self.target_temp.1 || self.profile.1 {
             heat_tx.send(SyncHeatStateEnum::TargetTemp(self.target_temp.0, self.profile.0)).await;
-            display_tx.send(SyncDisplayStateEnum::TargetTemp(self.target_temp.0, self.profile.0)).await;
+            display_tx.send(SyncDisplayStateEnum::PeakTargetTemp(self.target_temp.0, self.profile.0)).await;
         }
         
         if self.pid.1 || self.pid_p.1 || self.pid_i.1 || self.pid_d.1 {
@@ -402,10 +402,13 @@ pub(crate) async fn btn_task(startup_storage: &Storage, btn1: &'_ mut Input<'_, 
     let mut delay: u8 = DEFAULT_BTN_DELAY;
     let mut delay_counter: u8 = 0;
     loop {
+        let time_begin = embassy_time::Instant::now();
+        let debounce = time_begin.checked_add(embassy_time::Duration::from_millis(100)).unwrap_or(time_begin);
+
         let f1 = btn1.wait_for_falling_edge();
         let f2 = btn2.wait_for_falling_edge();
         let f3 = btn3.wait_for_falling_edge();
-        let f4 = Timer::after_millis(100);
+        let f4 = Timer::at(debounce);
         let sel_fut = crate::select!(f1, f2, f3, f4,);
         let action = match sel_fut.await {
             embassy_futures::select::Either::First(embassy_futures::select::Either::First(embassy_futures::select::Either::First(_btn1))) => {
@@ -466,6 +469,8 @@ pub(crate) async fn btn_task(startup_storage: &Storage, btn1: &'_ mut Input<'_, 
                 delay_action
             },
         };
+
+        Timer::at(debounce).await;
 
         last_action = action;
 

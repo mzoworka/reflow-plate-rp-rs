@@ -10,13 +10,14 @@ use ssd1306;
 use ssd1306::mode::DisplayConfig;
 use static_cell::StaticCell;
 
-use crate::{SyncStateChannelReceiver, select};
+use crate::{temperature, SyncStateChannelReceiver, select};
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum SyncDisplayStateEnum {
     Status(StaticString<60>),
     CurrTemp(u16),
-    TargetTemp(u16, u8),
+    PeakTargetTemp(u16, temperature::TemperatureProfileEnum),
+    CurrTargetTemp(u16),
     OutputEnabled(bool),
 }
 
@@ -31,14 +32,14 @@ pub(crate) async fn display_task(display: &mut ssd1306::Ssd1306<ssd1306::prelude
     let mut second_line: StaticString<60> = format_static!("Welcome!");
 
     let mut curr_temp: StaticString<5> = format_static!("???");
-    let mut target_temp: StaticString<3> = format_static!("000");
+    let mut curr_target_temp: StaticString<3> = format_static!("000");
+    let mut peak_target_temp: StaticString<3> = format_static!("000");
     let mut output_en: StaticString<1> = format_static!(" ");
    
     loop {
         let time_begin = embassy_time::Instant::now();
         let timeout = time_begin.checked_add(embassy_time::Duration::from_millis(100)).unwrap_or(time_begin);
 
-        let mut count: u16 = 0;
         loop
         {
             let recv_fut = rx.receive();
@@ -51,8 +52,11 @@ pub(crate) async fn display_task(display: &mut ssd1306::Ssd1306<ssd1306::prelude
                     SyncDisplayStateEnum::CurrTemp(x) => {
                         curr_temp = format_static!("{:03}", x);
                     },
-                    SyncDisplayStateEnum::TargetTemp(temp, prof) => {
-                        target_temp = format_static!("{:03}", temp);
+                    SyncDisplayStateEnum::PeakTargetTemp(temp, _prof) => {
+                        peak_target_temp = format_static!("{:03}", temp);
+                    },
+                    SyncDisplayStateEnum::CurrTargetTemp(temp) => {
+                        curr_target_temp = format_static!("{:03}", temp);
                     },
                     SyncDisplayStateEnum::OutputEnabled(x) => {
                         output_en = match x {
@@ -63,10 +67,9 @@ pub(crate) async fn display_task(display: &mut ssd1306::Ssd1306<ssd1306::prelude
                 },
                 embassy_futures::select::Either::Second(_delay) => { break; },
             }
-            count += 1;
         }
 
-        let first_line: StaticString<25> = format_static!("{} -> {} [{}] ({:03})", curr_temp, target_temp, output_en, count.min(999));        
+        let first_line: StaticString<25> = format_static!("{:03} -> {:03}({:03}) [{}]", curr_temp, curr_target_temp, peak_target_temp, output_en);        
 
         display.clear_buffer();
 

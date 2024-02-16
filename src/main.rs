@@ -9,6 +9,7 @@ mod tools;
 mod heater;
 mod watchdog;
 mod thermistor;
+mod temperature;
 
 use embassy_executor::Spawner;
 use embassy_rp::adc::{Adc, Channel, Config, InterruptHandler};
