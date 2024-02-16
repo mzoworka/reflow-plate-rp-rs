@@ -391,6 +391,7 @@ pub(crate) async fn btn_task(startup_storage: &Storage, btn1: &'_ mut Input<'_, 
     const DEFAULT_BTN_DELAY: u8 = 10;
 
     let mut menu = Menu::default();
+    menu.pid.0 = startup_storage.pid;
     menu.pid_p.0 = startup_storage.pid_p;
     menu.pid_i.0 = startup_storage.pid_i;
     menu.pid_d.0 = startup_storage.pid_d;
