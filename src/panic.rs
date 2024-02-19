@@ -9,10 +9,9 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 
         let core = unsafe { embassy_rp::Peripherals::steal() };
         crate::reset_peripherals_on_exception(core);
-        
+
         let core = unsafe { embassy_rp::Peripherals::steal() };
         crate::print_low_level(core, info);
-        
     }
     hard_fault();
 }

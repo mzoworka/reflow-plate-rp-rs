@@ -1,12 +1,13 @@
-use embassy_time::Timer;
-use embassy_rp::pwm::{Pwm, self};
 use embassy_rp::adc::{Adc, Channel};
+use embassy_rp::pwm::{self, Pwm};
+use embassy_time::Timer;
 use pid_lite::Controller;
 
 use crate::display::SyncDisplayStateEnum;
 use crate::thermistor::Thermistor;
+use crate::tools::SyncStateChannelReceiver;
 use crate::watchdog::SyncWdStateEnum;
-use crate::{SyncStateChannelReceiver, SyncStateChannelSender, select, storage, temperature};
+use crate::{channels, select, storage, temperature, SyncStateChannelSender};
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum SyncHeatStateEnum {
@@ -14,81 +15,149 @@ pub(crate) enum SyncHeatStateEnum {
     Pid((bool, f32, f32, f32)),
 }
 
-pub(crate) async fn heat_task(startup_storage: &storage::Storage, adc: &'_ mut Adc<'_, embassy_rp::adc::Async>, temp_ch: &'_ mut Channel<'_>, thermistor: &Thermistor, mosfet: &'_ mut Pwm<'_, embassy_rp::peripherals::PWM_CH3>, display_tx: SyncStateChannelSender<'_, SyncDisplayStateEnum>, wd_tx: SyncStateChannelSender<'_, SyncWdStateEnum>, heat_rx: SyncStateChannelReceiver<'_, SyncHeatStateEnum>) -> ! {
-    let mut target_temp = temperature::TemperatureProfile::new(0, temperature::TemperatureProfileEnum::Static);
-    let mut pid_use = startup_storage.pid;
-    let mut pid_p = startup_storage.pid_p;
-    let mut pid_i = startup_storage.pid_i;
-    let mut pid_d = startup_storage.pid_d;
-    let mut controller = Controller::new(0 as f64, pid_p as f64, pid_i as f64, pid_d as f64);
-    let mut time_begin = embassy_time::Instant::now();
-    let mut pwm_config = pwm::Config::default();
-    loop {
-        //recv updates or sleep
-        let recv_fut = heat_rx.receive();
-        let sleep_fut = Timer::after_millis(100);
-        let select_fut = select!(recv_fut, sleep_fut, );
-        match select_fut.await {
-            embassy_futures::select::Either::First(state) => match state {
-                SyncHeatStateEnum::TargetTemp(temp, prof) => {
-                    target_temp.set_profile(prof);
-                    target_temp.set_peak(temp);
-                    target_temp.reset();
+pub(crate) struct Heater<'a> {
+    channel: SyncStateChannelReceiver<'a, SyncHeatStateEnum>,
+    target_temp: temperature::TemperatureProfile,
+    pid_use: bool,
+    pid_p: f32,
+    pid_i: f32,
+    pid_d: f32,
+    controller: Controller,
+    pwm_config: pwm::Config,
+    adc: Adc<'a, embassy_rp::adc::Async>,
+    adc_temp_ch: Channel<'a>,
+    thermistor: &'a Thermistor,
+    mosfet: Pwm<'a, embassy_rp::peripherals::PWM_CH3>,
+    display_tx: SyncStateChannelSender<'a, SyncDisplayStateEnum>,
+    wd_tx: SyncStateChannelSender<'a, SyncWdStateEnum>,
+}
 
-                }
-                SyncHeatStateEnum::Pid(x) => {
-                    pid_use = x.0;
-                    pid_p = x.1;
-                    pid_i = x.2;
-                    pid_d = x.3;
-                    controller.set_proportional_gain(pid_p as f64);
-                    controller.set_integral_gain(pid_i as f64);
-                    controller.set_derivative_gain(pid_d as f64);
-                    controller.reset();
+impl<'a> Heater<'a> {
+    pub fn new(
+        startup_storage: &storage::StorageData,
+        adc: Adc<'a, embassy_rp::adc::Async>,
+        adc_temp_ch: Channel<'a>,
+        thermistor: &'a Thermistor,
+        mosfet: Pwm<'a, embassy_rp::peripherals::PWM_CH3>,
+        channels: &'a channels::Channels,
+    ) -> Self {
+        Self {
+            channel: channels.get_heat_rx(),
+            target_temp: temperature::TemperatureProfile::new(
+                0,
+                temperature::TemperatureProfileEnum::Static,
+            ),
+            pid_use: startup_storage.pid,
+            pid_p: startup_storage.pid_p,
+            pid_i: startup_storage.pid_i,
+            pid_d: startup_storage.pid_d,
+            controller: Controller::new(
+                0 as f64,
+                startup_storage.pid_p as f64,
+                startup_storage.pid_i as f64,
+                startup_storage.pid_d as f64,
+            ),
+            pwm_config: pwm::Config::default(),
+            adc,
+            adc_temp_ch,
+            thermistor,
+            mosfet,
+            display_tx: channels.get_display_tx(),
+            wd_tx: channels.get_watchdog_tx(),
+        }
+    }
+
+    pub async fn heat_task(&mut self) -> ! {
+        let rx = self.channel;
+        let mut time_begin = embassy_time::Instant::now();
+        loop {
+            //recv updates or sleep
+            let recv_fut = rx.receive();
+            let sleep_fut = Timer::after_millis(100);
+            let select_fut = select!(recv_fut, sleep_fut,);
+            match select_fut.await {
+                embassy_futures::select::Either::First(state) => match state {
+                    SyncHeatStateEnum::TargetTemp(temp, prof) => {
+                        self.target_temp.set_profile(prof);
+                        self.target_temp.set_peak(temp);
+                        self.target_temp.reset();
+                        self.controller.reset();
+                    }
+                    SyncHeatStateEnum::Pid(x) => {
+                        self.pid_use = x.0;
+                        self.pid_p = x.1;
+                        self.pid_i = x.2;
+                        self.pid_d = x.3;
+                        self.controller.set_proportional_gain(self.pid_p as f64);
+                        self.controller.set_integral_gain(self.pid_i as f64);
+                        self.controller.set_derivative_gain(self.pid_d as f64);
+                        self.controller.reset();
+                    }
                 },
-            },
-            embassy_futures::select::Either::Second(()) => {},
-        }
+                embassy_futures::select::Either::Second(()) => {}
+            }
 
-        //read current temp
-        let temp_val = adc.read(temp_ch).await.expect("heat_task: temp fail");
-        let current_temp = thermistor.calc_temp(temp_val) as u16;
+            //read current temp
+            let temp_val = self
+                .adc
+                .read(&mut self.adc_temp_ch)
+                .await
+                .expect("heat_task: temp fail");
+            let current_temp = self.thermistor.calc_temp(temp_val) as u16;
 
-        let time_elapsed = embassy_time::Instant::now() - time_begin;
-        if time_elapsed.as_millis() > 10 {
-            //calc corrections
-            target_temp.update(time_elapsed.into());
-            let current_temp_target = target_temp.get_current_target();
-            pwm_config.compare_a = if !pid_use {
-                if current_temp < current_temp_target {
-                    pwm_config.top
+            let time_elapsed = embassy_time::Instant::now() - time_begin;
+            if time_elapsed.as_millis() > 10 {
+                //calc corrections
+                self.target_temp.update(time_elapsed.into());
+                let current_temp_target = self.target_temp.get_current_target();
+                self.pwm_config.compare_a = if !self.pid_use {
+                    if current_temp < current_temp_target {
+                        self.pwm_config.top
+                    } else {
+                        0
+                    }
                 } else {
-                    0
+                    self.controller.set_target(current_temp_target as f64);
+                    self.controller
+                        .update_elapsed(current_temp as f64, time_elapsed.into())
+                        as u16
+                };
+
+                //set mosfet
+                self.mosfet.set_config(&self.pwm_config);
+
+                time_begin = embassy_time::Instant::now();
+
+                //send updates
+                if self
+                    .display_tx
+                    .try_send(SyncDisplayStateEnum::CurrTemp(current_temp))
+                    .is_err()
+                {
+                    //ignore: msg dropped
                 }
-            } else {
-                controller.set_target(current_temp_target as f64);
-                controller.update_elapsed(current_temp as f64, time_elapsed.into()) as u16
-            };
+                if self
+                    .display_tx
+                    .try_send(SyncDisplayStateEnum::CurrTargetTemp(current_temp_target))
+                    .is_err()
+                {
+                    //ignore: msg dropped
+                }
+                if self
+                    .display_tx
+                    .try_send(SyncDisplayStateEnum::OutputEnabled(
+                        self.pwm_config.compare_a > 0,
+                    ))
+                    .is_err()
+                {
+                    //ignore: msg dropped
+                }
+            }
 
-            //set mosfet
-            mosfet.set_config(&pwm_config);
-
-            time_begin = embassy_time::Instant::now();
-            
-            //send updates
-            if display_tx.try_send(SyncDisplayStateEnum::CurrTemp(current_temp)).is_err() {
-                //ignore: msg dropped
-            }
-            if display_tx.try_send(SyncDisplayStateEnum::CurrTargetTemp(current_temp_target)).is_err() {
-                //ignore: msg dropped
-            }
-            if display_tx.try_send(SyncDisplayStateEnum::OutputEnabled(pwm_config.compare_a > 0)).is_err() {
-                //ignore: msg dropped
-            }
+            //feed wd
+            self.wd_tx
+                .try_send(SyncWdStateEnum::HeatTask)
+                .expect("heat_task: wdtx fail");
         }
-        
-        //feed wd
-        wd_tx.try_send(SyncWdStateEnum::HeatTask).expect("heat_task: wdtx fail");
-        
     }
 }

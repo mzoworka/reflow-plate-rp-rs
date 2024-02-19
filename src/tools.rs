@@ -1,4 +1,3 @@
-
 #[macro_export]
 macro_rules! select {
     ($first:ident, $second:ident, $($rest:ident,)*) => {
@@ -27,14 +26,17 @@ pub(crate) const BINCODE_CONFIG: BincodeConfigType = bincode::config::standard()
     .with_little_endian()
     .with_fixed_int_encoding();
 
-pub(crate) async fn wait_for_each_state<T: PartialEq, const N: usize>(states: [T; N], rx: SyncStateChannelReceiver<'_, T>) -> [T; N] {
+pub(crate) async fn wait_for_each_state<T: PartialEq, const N: usize>(
+    states: [T; N],
+    rx: SyncStateChannelReceiver<'_, T>,
+) -> [T; N] {
     let mut values = states.map(|x| (x, 1));
     let mut found = 0;
     loop {
         let x = rx.receive().await;
-        for i in 0..N {
-            if values[i].0 == x && values[i].1 != 0 {
-                values[i].1 -= 1; 
+        for val in &mut values {
+            if val.0 == x && val.1 != 0 {
+                val.1 -= 1;
                 found += 1;
                 break;
             }
@@ -45,6 +47,13 @@ pub(crate) async fn wait_for_each_state<T: PartialEq, const N: usize>(states: [T
     }
 }
 
-pub(crate) type SyncStateChannel<T> = embassy_sync::channel::Channel<embassy_sync::blocking_mutex::raw::ThreadModeRawMutex, T, 4>;
-pub(crate) type SyncStateChannelReceiver<'a, T> = embassy_sync::channel::Receiver<'a, embassy_sync::blocking_mutex::raw::ThreadModeRawMutex, T, 4>;
-pub(crate) type SyncStateChannelSender<'a, T> = embassy_sync::channel::Sender<'a, embassy_sync::blocking_mutex::raw::ThreadModeRawMutex, T, 4>;
+pub(crate) type SyncStateChannel<T> =
+    embassy_sync::channel::Channel<embassy_sync::blocking_mutex::raw::ThreadModeRawMutex, T, 4>;
+pub(crate) type SyncStateChannelReceiver<'a, T> = embassy_sync::channel::Receiver<
+    'a,
+    embassy_sync::blocking_mutex::raw::ThreadModeRawMutex,
+    T,
+    4,
+>;
+pub(crate) type SyncStateChannelSender<'a, T> =
+    embassy_sync::channel::Sender<'a, embassy_sync::blocking_mutex::raw::ThreadModeRawMutex, T, 4>;
