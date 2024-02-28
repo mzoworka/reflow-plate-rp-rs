@@ -1,5 +1,8 @@
 use core::time::Duration;
 
+const MAX_WAIT_TIME: f32 = 10.0;
+const TEMP_LEAD_OFFSET: u16 = 5;
+
 #[repr(u8)]
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum TemperatureProfileEnum {
@@ -72,14 +75,14 @@ impl TemperatureProfile {
                     self.state = TemperatureProfileState::FirstRampSync;
                     self.state_start = self.time;
                 }
-                (self.time * 4.0) as u16 //time: 0..38 => temp: 0..152
+                TEMP_LEAD_OFFSET + (self.time * 4.0) as u16 //time: 0..38 => temp: 0..152
             }
             TemperatureProfileState::FirstRampSync => {
                 if self.temperature >= 150 {
                     self.state = TemperatureProfileState::PreHeat;
                     self.state_start = self.time;
                 }
-                150
+                TEMP_LEAD_OFFSET + 150
             }
             TemperatureProfileState::PreHeat => {
                 if self.time >= self.state_start + 80.0 {
@@ -87,7 +90,7 @@ impl TemperatureProfile {
                     self.state_start = self.time;
                 }
                 let diff = self.time - self.state_start;
-                150 + (diff * 30.0 / 80.0) as u16 //time: 38..120 => temp: 150..180
+                TEMP_LEAD_OFFSET + 150 + (diff * 30.0 / 80.0) as u16 //time: 38..120 => temp: 150..180
             }
             TemperatureProfileState::SecondRamp => {
                 if self.time >= self.state_start + 13.0 {
@@ -95,14 +98,14 @@ impl TemperatureProfile {
                     self.state_start = self.time;
                 }
                 let diff = self.time - self.state_start;
-                180 + (diff * 40.0 / 13.0) as u16 //time: 120..133 => temp: 180..220
+                TEMP_LEAD_OFFSET + 180 + (diff * 40.0 / 13.0) as u16 //time: 120..133 => temp: 180..220
             }
             TemperatureProfileState::SecondRampSync => {
-                if self.time >= self.state_start + 10.0 || self.temperature >= 220 {
+                if self.time >= self.state_start + MAX_WAIT_TIME || self.temperature >= 220 {
                     self.state = TemperatureProfileState::PeakRamp;
                     self.state_start = self.time;
                 }
-                220
+                TEMP_LEAD_OFFSET + 220
             }
             TemperatureProfileState::PeakRamp => {
                 if self.time >= self.state_start + 20.0 {
@@ -110,11 +113,12 @@ impl TemperatureProfile {
                     self.state_start = self.time;
                 }
                 let diff = self.time - self.state_start;
-                let temp_diff = self.peak - 220;
-                220 + (temp_diff as f32 * diff / 20.0) as u16 //time: 133..153 => temp: 220..peak
+                let temp_diff = self.peak - (TEMP_LEAD_OFFSET + 220);
+                TEMP_LEAD_OFFSET + 220 + (temp_diff as f32 * diff / 20.0) as u16
+                //time: 133..153 => temp: 220..peak
             }
             TemperatureProfileState::PeakRampSync => {
-                if self.time >= self.state_start + 10.0 || self.temperature >= self.peak {
+                if self.time >= self.state_start + MAX_WAIT_TIME || self.temperature >= self.peak {
                     self.state = TemperatureProfileState::Cooldown;
                     self.state_start = self.time;
                 }
