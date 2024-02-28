@@ -4,7 +4,7 @@ use embassy_rp::peripherals::I2C0;
 use embassy_time::Timer;
 use embedded_graphics::geometry::Point;
 use embedded_graphics::mono_font::MonoTextStyleBuilder;
-use embedded_graphics::{self, text, Drawable};
+use embedded_graphics::{text, Drawable};
 use simplestaticstring::{format_static, StaticString, ToStaticString};
 use ssd1306::mode::DisplayConfig;
 

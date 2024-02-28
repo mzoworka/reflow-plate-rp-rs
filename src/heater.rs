@@ -70,6 +70,7 @@ impl<'a> Heater<'a> {
     pub async fn heat_task(&mut self) -> ! {
         let rx = self.channel;
         let mut time_begin = embassy_time::Instant::now();
+        let mut last_temp_target = 0;
         loop {
             //recv updates or sleep
             let recv_fut = rx.receive();
@@ -108,7 +109,7 @@ impl<'a> Heater<'a> {
             let time_elapsed = embassy_time::Instant::now() - time_begin;
             if time_elapsed.as_millis() > 10 {
                 //calc corrections
-                self.target_temp.update(time_elapsed.into());
+                self.target_temp.update(time_elapsed.into(), current_temp);
                 let current_temp_target = self.target_temp.get_current_target();
                 self.pwm_config.compare_a = if !self.pid_use {
                     if current_temp < current_temp_target {
@@ -117,7 +118,11 @@ impl<'a> Heater<'a> {
                         0
                     }
                 } else {
-                    self.controller.set_target(current_temp_target as f64);
+                    if current_temp_target != last_temp_target {
+                        last_temp_target = current_temp_target;
+                        self.controller.set_target(current_temp_target as f64);
+                        self.controller.reset();
+                    }
                     self.controller
                         .update_elapsed(current_temp as f64, time_elapsed.into())
                         as u16
