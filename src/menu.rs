@@ -209,6 +209,110 @@ impl MenuItemActionTrait for MenuItemPidUsePid {
     }
 }
 
+struct MenuItemWaitTime {}
+impl MenuItemTextTrait for MenuItemWaitTime {
+    fn get(&self, menu: &Menu) -> StaticString<20> {
+        format_static!("Wait time: {:03}", menu.temp_wait_time.0 as i16)
+    }
+}
+
+impl MenuItemActionTrait for MenuItemWaitTime {
+    fn call(&self, btn: u8, amount: u8, menu: &mut Menu) -> MenuItemAction {
+        match btn {
+            1 => {
+                menu.temp_wait_time.0 += 1.0 * (amount as f32);
+                menu.temp_wait_time.1 = true;
+                MenuItemAction::None
+            }
+            2 => MenuItemAction::Back,
+            3 => {
+                menu.temp_wait_time.0 -= 1.0 * (amount as f32);
+                menu.temp_wait_time.1 = true;
+                MenuItemAction::None
+            }
+            _ => MenuItemAction::None,
+        }
+    }
+}
+
+struct MenuItemExtraTime {}
+impl MenuItemTextTrait for MenuItemExtraTime {
+    fn get(&self, menu: &Menu) -> StaticString<20> {
+        format_static!("Extra time: {:03}", menu.temp_extra_time.0 as i16)
+    }
+}
+
+impl MenuItemActionTrait for MenuItemExtraTime {
+    fn call(&self, btn: u8, amount: u8, menu: &mut Menu) -> MenuItemAction {
+        match btn {
+            1 => {
+                menu.temp_extra_time.0 += 1.0 * (amount as f32);
+                menu.temp_extra_time.1 = true;
+                MenuItemAction::None
+            }
+            2 => MenuItemAction::Back,
+            3 => {
+                menu.temp_extra_time.0 -= 1.0 * (amount as f32);
+                menu.temp_extra_time.1 = true;
+                MenuItemAction::None
+            }
+            _ => MenuItemAction::None,
+        }
+    }
+}
+
+struct MenuItemTempOffset {}
+impl MenuItemTextTrait for MenuItemTempOffset {
+    fn get(&self, menu: &Menu) -> StaticString<20> {
+        format_static!("Temp offset: {:03}", menu.temp_offset.0)
+    }
+}
+
+impl MenuItemActionTrait for MenuItemTempOffset {
+    fn call(&self, btn: u8, amount: u8, menu: &mut Menu) -> MenuItemAction {
+        match btn {
+            1 => {
+                menu.temp_offset.0 += amount as i16;
+                menu.temp_offset.1 = true;
+                MenuItemAction::None
+            }
+            2 => MenuItemAction::Back,
+            3 => {
+                menu.temp_offset.0 -= amount as i16;
+                menu.temp_offset.1 = true;
+                MenuItemAction::None
+            }
+            _ => MenuItemAction::None,
+        }
+    }
+}
+
+struct MenuItemTempLeadOffset {}
+impl MenuItemTextTrait for MenuItemTempLeadOffset {
+    fn get(&self, menu: &Menu) -> StaticString<20> {
+        format_static!("Temp offset: {:03}", menu.temp_lead_offset.0)
+    }
+}
+
+impl MenuItemActionTrait for MenuItemTempLeadOffset {
+    fn call(&self, btn: u8, amount: u8, menu: &mut Menu) -> MenuItemAction {
+        match btn {
+            1 => {
+                menu.temp_lead_offset.0 += amount as i16;
+                menu.temp_lead_offset.1 = true;
+                MenuItemAction::None
+            }
+            2 => MenuItemAction::Back,
+            3 => {
+                menu.temp_lead_offset.0 -= amount as i16;
+                menu.temp_lead_offset.1 = true;
+                MenuItemAction::None
+            }
+            _ => MenuItemAction::None,
+        }
+    }
+}
+
 //menus
 const MENU_TOP: &MenuType = &[MenuItem {
     text: MenuItemText::Static("Menu"),
@@ -223,6 +327,10 @@ const MENU_MAIN: &MenuType = &[
     MenuItem {
         text: MenuItemText::Static("Pid"),
         action: MenuItemAction::OpenMenu(&MENU_PID),
+    },
+    MenuItem {
+        text: MenuItemText::Static("Settings"),
+        action: MenuItemAction::OpenMenu(&MENU_SETTINGS),
     },
     MenuItem {
         text: MenuItemText::Static("Back"),
@@ -293,22 +401,69 @@ const MENU_PID_D: &MenuType = &[MenuItem {
     action: MenuItemAction::Custom(&MenuItemPidD {}),
 }];
 
+const MENU_SETTINGS: &MenuType = &[
+    MenuItem {
+        text: MenuItemText::Static("Temp wait time"),
+        action: MenuItemAction::OpenMenu(&MENU_SETTINGS_WAIT_TIME),
+    },
+    MenuItem {
+        text: MenuItemText::Static("Profile extra time"),
+        action: MenuItemAction::OpenMenu(&MENU_SETTINGS_EXTRA_TIME),
+    },
+    MenuItem {
+        text: MenuItemText::Static("Temp offset"),
+        action: MenuItemAction::OpenMenu(&MENU_SETTINGS_TEMP_OFFSET),
+    },
+    MenuItem {
+        text: MenuItemText::Static("Temp lead offset"),
+        action: MenuItemAction::OpenMenu(&MENU_SETTINGS_TEMP_LEAD_OFFSET),
+    },
+    MenuItem {
+        text: MenuItemText::Static("Back"),
+        action: MenuItemAction::Back,
+    },
+];
+
+const MENU_SETTINGS_WAIT_TIME: &MenuType = &[MenuItem {
+    text: MenuItemText::Render(&MenuItemWaitTime {}),
+    action: MenuItemAction::Custom(&MenuItemWaitTime {}),
+}];
+
+const MENU_SETTINGS_EXTRA_TIME: &MenuType = &[MenuItem {
+    text: MenuItemText::Render(&MenuItemExtraTime {}),
+    action: MenuItemAction::Custom(&MenuItemExtraTime {}),
+}];
+
+const MENU_SETTINGS_TEMP_OFFSET: &MenuType = &[MenuItem {
+    text: MenuItemText::Render(&MenuItemTempOffset {}),
+    action: MenuItemAction::Custom(&MenuItemTempOffset {}),
+}];
+
+const MENU_SETTINGS_TEMP_LEAD_OFFSET: &MenuType = &[MenuItem {
+    text: MenuItemText::Render(&MenuItemTempLeadOffset {}),
+    action: MenuItemAction::Custom(&MenuItemTempLeadOffset {}),
+}];
+
 //menu struct
 pub(crate) struct Menu<'a> {
     menu: &'static MenuType,
     position: u8,
-    target_temp: (u16, bool),
-    profile: (temperature::TemperatureProfileEnum, bool),
-    pid: (bool, bool),
-    pid_p: (f32, bool),
-    pid_i: (f32, bool),
-    pid_d: (f32, bool),
     btn1: Input<'a, embassy_rp::peripherals::PIN_2>,
     btn2: Input<'a, embassy_rp::peripherals::PIN_3>,
     btn3: Input<'a, embassy_rp::peripherals::PIN_4>,
     display_tx: SyncStateChannelSender<'a, SyncDisplayStateEnum>,
     heat_tx: SyncStateChannelSender<'a, SyncHeatStateEnum>,
     storage_tx: SyncStateChannelSender<'a, SyncStorageStateEnum>,
+    target_temp: (u16, bool),
+    profile: (temperature::TemperatureProfileEnum, bool),
+    pid: (bool, bool),
+    pid_p: (f32, bool),
+    pid_i: (f32, bool),
+    pid_d: (f32, bool),
+    temp_wait_time: (f32, bool),
+    temp_extra_time: (f32, bool),
+    temp_offset: (i16, bool),
+    temp_lead_offset: (i16, bool),
 }
 
 impl<'a> Menu<'a> {
@@ -322,22 +477,26 @@ impl<'a> Menu<'a> {
         Self {
             menu: MENU_TOP,
             position: 0u8,
-            target_temp: (0, false),
-            profile: (temperature::TemperatureProfileEnum::Static, false),
-            pid: (startup_storage.pid, false),
-            pid_p: (startup_storage.pid_p, false),
-            pid_i: (startup_storage.pid_i, false),
-            pid_d: (startup_storage.pid_d, false),
             btn1,
             btn2,
             btn3,
             display_tx: channels.get_display_tx(),
             heat_tx: channels.get_heat_tx(),
             storage_tx: channels.get_storage_tx(),
+            target_temp: (0, false),
+            profile: (temperature::TemperatureProfileEnum::Static, false),
+            pid: (startup_storage.pid, false),
+            pid_p: (startup_storage.pid_p, false),
+            pid_i: (startup_storage.pid_i, false),
+            pid_d: (startup_storage.pid_d, false),
+            temp_wait_time: (startup_storage.temp_wait_time, false),
+            temp_extra_time: (startup_storage.temp_extra_time, false),
+            temp_offset: (startup_storage.temp_offset, false),
+            temp_lead_offset: (startup_storage.temp_lead_offset, false),
         }
     }
 
-    pub fn render(&self) -> StaticString<60> {
+    pub fn render(&self) -> StaticString<100> {
         let mut output = StaticString::default();
         for pos in 0..self.menu.len() {
             let item = &self.menu[pos];
@@ -467,20 +626,43 @@ impl<'a> Menu<'a> {
 
         if self.pid.1 || self.pid_p.1 || self.pid_i.1 || self.pid_d.1 {
             heat_tx
-                .send(SyncHeatStateEnum::Pid((
-                    self.pid.0,
-                    self.pid_p.0,
-                    self.pid_i.0,
-                    self.pid_d.0,
-                )))
+                .send(SyncHeatStateEnum::Pid {
+                    pid: self.pid.0,
+                    pid_p: self.pid_p.0,
+                    pid_i: self.pid_i.0,
+                    pid_d: self.pid_d.0,
+                })
                 .await;
             storage_tx
-                .send(SyncStorageStateEnum::WritePid((
-                    self.pid.0,
-                    self.pid_p.0,
-                    self.pid_i.0,
-                    self.pid_d.0,
-                )))
+                .send(SyncStorageStateEnum::WritePid {
+                    pid: self.pid.0,
+                    pid_p: self.pid_p.0,
+                    pid_i: self.pid_i.0,
+                    pid_d: self.pid_d.0,
+                })
+                .await;
+        }
+
+        if self.temp_wait_time.1
+            || self.temp_extra_time.1
+            || self.temp_offset.1
+            || self.temp_lead_offset.1
+        {
+            heat_tx
+                .send(SyncHeatStateEnum::TempSettings {
+                    wait_time: self.temp_wait_time.0,
+                    extra_time: self.temp_extra_time.0,
+                    temp_lead_offset: self.temp_lead_offset.0,
+                    temp_offset: self.temp_offset.0,
+                })
+                .await;
+            storage_tx
+                .send(SyncStorageStateEnum::WriteTempSettings {
+                    wait_time: self.temp_wait_time.0,
+                    extra_time: self.temp_extra_time.0,
+                    temp_lead_offset: self.temp_lead_offset.0,
+                    temp_offset: self.temp_offset.0,
+                })
                 .await;
         }
 
@@ -489,6 +671,10 @@ impl<'a> Menu<'a> {
         self.pid_p.1 = false;
         self.pid_i.1 = false;
         self.pid_d.1 = false;
+        self.temp_wait_time.1 = false;
+        self.temp_extra_time.1 = false;
+        self.temp_offset.1 = false;
+        self.temp_lead_offset.1 = false;
     }
 
     pub async fn btn_task(&mut self) -> ! {

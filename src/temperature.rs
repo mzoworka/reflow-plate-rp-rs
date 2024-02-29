@@ -1,8 +1,5 @@
 use core::time::Duration;
 
-const MAX_WAIT_TIME: f32 = 10.0;
-const TEMP_LEAD_OFFSET: u16 = 5;
-
 #[repr(u8)]
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum TemperatureProfileEnum {
@@ -13,11 +10,15 @@ pub enum TemperatureProfileEnum {
 enum TemperatureProfileState {
     FirstRamp,
     FirstRampSync,
+    FirstRampExtra,
     PreHeat,
+    PreHeatExtra,
     SecondRamp,
     SecondRampSync,
+    SecondRampExtra,
     PeakRamp,
     PeakRampSync,
+    PeakRampExtra,
     Cooldown,
 }
 
@@ -28,10 +29,21 @@ pub struct TemperatureProfile {
     state: TemperatureProfileState,
     state_start: f32,
     temperature: u16,
+    temp_wait_time: f32,
+    temp_extra_time: f32,
+    temp_lead_offset: i16,
+    temp_offset: i16,
 }
 
 impl TemperatureProfile {
-    pub fn new(peak: u16, profile: TemperatureProfileEnum) -> Self {
+    pub fn new(
+        peak: u16,
+        profile: TemperatureProfileEnum,
+        temp_wait_time: f32,
+        temp_extra_time: f32,
+        temp_lead_offset: i16,
+        temp_offset: i16,
+    ) -> Self {
         Self {
             peak,
             profile,
@@ -39,7 +51,24 @@ impl TemperatureProfile {
             state: TemperatureProfileState::FirstRamp,
             state_start: 0.0,
             temperature: 0,
+            temp_wait_time,
+            temp_extra_time,
+            temp_lead_offset,
+            temp_offset,
         }
+    }
+
+    pub fn set_settings(
+        &mut self,
+        temp_wait_time: f32,
+        temp_extra_time: f32,
+        temp_lead_offset: i16,
+        temp_offset: i16,
+    ) {
+        self.temp_wait_time = temp_wait_time;
+        self.temp_extra_time = temp_extra_time;
+        self.temp_lead_offset = temp_lead_offset;
+        self.temp_offset = temp_offset;
     }
 
     pub fn set_profile(&mut self, profile: TemperatureProfileEnum) {
@@ -75,22 +104,48 @@ impl TemperatureProfile {
                     self.state = TemperatureProfileState::FirstRampSync;
                     self.state_start = self.time;
                 }
-                TEMP_LEAD_OFFSET + (self.time * 4.0) as u16 //time: 0..38 => temp: 0..152
+                ((self.time * 4.0) as u16)
+                    .saturating_add_signed(self.temp_lead_offset)
+                    .saturating_add_signed(self.temp_offset) //time: 0..38 => temp: 0..152
             }
             TemperatureProfileState::FirstRampSync => {
-                if self.temperature >= 150 {
+                if self.time >= self.state_start + self.temp_wait_time
+                    || self.temperature >= 150u16.saturating_add_signed(self.temp_offset)
+                {
+                    self.state = TemperatureProfileState::FirstRampExtra;
+                    self.state_start = self.time;
+                }
+                150u16
+                    .saturating_add_signed(self.temp_lead_offset)
+                    .saturating_add_signed(self.temp_offset)
+            }
+            TemperatureProfileState::FirstRampExtra => {
+                if self.time >= self.state_start + self.temp_extra_time {
                     self.state = TemperatureProfileState::PreHeat;
                     self.state_start = self.time;
                 }
-                TEMP_LEAD_OFFSET + 150
+                150u16
+                    .saturating_add_signed(self.temp_lead_offset)
+                    .saturating_add_signed(self.temp_offset)
             }
             TemperatureProfileState::PreHeat => {
                 if self.time >= self.state_start + 80.0 {
-                    self.state = TemperatureProfileState::SecondRamp;
+                    self.state = TemperatureProfileState::PreHeatExtra;
                     self.state_start = self.time;
                 }
                 let diff = self.time - self.state_start;
-                TEMP_LEAD_OFFSET + 150 + (diff * 30.0 / 80.0) as u16 //time: 38..120 => temp: 150..180
+                (150 + (diff * 30.0 / 80.0) as u16)
+                    .saturating_add_signed(self.temp_lead_offset)
+                    .saturating_add_signed(self.temp_offset) //time: 38..120 => temp: 150..180
+            }
+            TemperatureProfileState::PreHeatExtra => {
+                if self.time >= self.state_start + self.temp_extra_time {
+                    self.state = TemperatureProfileState::SecondRamp;
+                    self.state_start = self.time;
+                }
+                180u16
+                    .saturating_add_signed(self.temp_lead_offset)
+                    .saturating_add_signed(self.temp_offset)
             }
             TemperatureProfileState::SecondRamp => {
                 if self.time >= self.state_start + 13.0 {
@@ -98,14 +153,25 @@ impl TemperatureProfile {
                     self.state_start = self.time;
                 }
                 let diff = self.time - self.state_start;
-                TEMP_LEAD_OFFSET + 180 + (diff * 40.0 / 13.0) as u16 //time: 120..133 => temp: 180..220
+                (180 + (diff * 40.0 / 13.0) as u16)
+                    .saturating_add_signed(self.temp_lead_offset)
+                    .saturating_add_signed(self.temp_offset) //time: 120..133 => temp: 180..220
             }
             TemperatureProfileState::SecondRampSync => {
-                if self.time >= self.state_start + MAX_WAIT_TIME || self.temperature >= 220 {
+                if self.time >= self.state_start + self.temp_wait_time
+                    || self.temperature >= 220u16.saturating_add_signed(self.temp_offset)
+                {
+                    self.state = TemperatureProfileState::SecondRampExtra;
+                    self.state_start = self.time;
+                }
+                220u16.saturating_add_signed(self.temp_lead_offset)
+            }
+            TemperatureProfileState::SecondRampExtra => {
+                if self.time >= self.state_start + self.temp_extra_time {
                     self.state = TemperatureProfileState::PeakRamp;
                     self.state_start = self.time;
                 }
-                TEMP_LEAD_OFFSET + 220
+                220u16.saturating_add_signed(self.temp_lead_offset)
             }
             TemperatureProfileState::PeakRamp => {
                 if self.time >= self.state_start + 20.0 {
@@ -113,16 +179,30 @@ impl TemperatureProfile {
                     self.state_start = self.time;
                 }
                 let diff = self.time - self.state_start;
-                let temp_diff = self.peak - (TEMP_LEAD_OFFSET + 220);
-                TEMP_LEAD_OFFSET + 220 + (temp_diff as f32 * diff / 20.0) as u16
+                let temp_diff = self.peak
+                    - 220u16
+                        .saturating_add_signed(self.temp_lead_offset)
+                        .saturating_add_signed(self.temp_offset);
+                (220 + (temp_diff as f32 * diff / 20.0) as u16)
+                    .saturating_add_signed(self.temp_lead_offset)
+                    .saturating_add_signed(self.temp_offset)
                 //time: 133..153 => temp: 220..peak
             }
             TemperatureProfileState::PeakRampSync => {
-                if self.time >= self.state_start + MAX_WAIT_TIME || self.temperature >= self.peak {
+                if self.time >= self.state_start + self.temp_wait_time
+                    || self.temperature >= self.peak.saturating_add_signed(self.temp_offset)
+                {
+                    self.state = TemperatureProfileState::PeakRampExtra;
+                    self.state_start = self.time;
+                }
+                self.peak.saturating_add_signed(self.temp_offset)
+            }
+            TemperatureProfileState::PeakRampExtra => {
+                if self.time >= self.state_start + self.temp_extra_time {
                     self.state = TemperatureProfileState::Cooldown;
                     self.state_start = self.time;
                 }
-                self.peak
+                self.peak.saturating_add_signed(self.temp_offset)
             }
             TemperatureProfileState::Cooldown => 0,
         }

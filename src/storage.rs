@@ -7,13 +7,29 @@ use crate::{
 };
 
 const FLASH_MAGIC: u8 = 0xB5;
-const FLASH_VERSION: u8 = 0x02;
+const FLASH_VERSION: u8 = 0x03;
 const FLASH_SIZE: usize = 2048 * 1024;
 const STORAGE_OFFSET: u32 = (2048 * 1024) - 4096;
 const STORAGE_SIZE: u32 = 4096;
 
+const MAX_WAIT_TIME_DEFAULT: f32 = 10.0;
+const EXTRA_TIME_DEFAULT: f32 = 0.0;
+const TEMP_LEAD_OFFSET_DEFAULT: i16 = 5;
+const TEMP_OFFSET_DEFAULT: i16 = 0;
+
 pub(crate) enum SyncStorageStateEnum {
-    WritePid((bool, f32, f32, f32)),
+    WritePid {
+        pid: bool,
+        pid_p: f32,
+        pid_i: f32,
+        pid_d: f32,
+    },
+    WriteTempSettings {
+        wait_time: f32,
+        extra_time: f32,
+        temp_lead_offset: i16,
+        temp_offset: i16,
+    },
 }
 
 #[derive(Debug, Encode, Decode, Clone)]
@@ -24,6 +40,10 @@ pub(crate) struct StorageData {
     pub pid_i: f32,
     pub pid_d: f32,
     pub pid: bool,
+    pub temp_wait_time: f32,
+    pub temp_extra_time: f32,
+    pub temp_lead_offset: i16,
+    pub temp_offset: i16,
 }
 
 impl Default for StorageData {
@@ -35,6 +55,10 @@ impl Default for StorageData {
             pid_i: 0.0,
             pid_d: 0.0,
             pid: false,
+            temp_wait_time: MAX_WAIT_TIME_DEFAULT,
+            temp_extra_time: EXTRA_TIME_DEFAULT,
+            temp_lead_offset: TEMP_LEAD_OFFSET_DEFAULT,
+            temp_offset: TEMP_OFFSET_DEFAULT,
         }
     }
 }
@@ -83,6 +107,12 @@ impl<'a> Storage<'a> {
             if storage.pid_d.is_nan() {
                 storage.pid_d = 0.0;
             }
+            if storage.temp_wait_time.is_nan() {
+                storage.temp_wait_time = MAX_WAIT_TIME_DEFAULT;
+            }
+            if storage.temp_extra_time.is_nan() {
+                storage.temp_extra_time = EXTRA_TIME_DEFAULT;
+            }
 
             storage
         } else {
@@ -95,25 +125,41 @@ impl<'a> Storage<'a> {
         loop {
             let query = rx.receive().await;
             match query {
-                SyncStorageStateEnum::WritePid(x) => {
-                    let mut buf = [0; STORAGE_SIZE as usize];
-
-                    self.storage.pid_p = x.1;
-                    self.storage.pid_i = x.2;
-                    self.storage.pid_d = x.3;
-                    self.storage.pid = x.0;
-
-                    bincode::encode_into_slice(&self.storage, &mut buf, BINCODE_CONFIG)
-                        .expect("flashtask enc fail");
-
-                    self.flash
-                        .blocking_erase(STORAGE_OFFSET, STORAGE_OFFSET + STORAGE_SIZE)
-                        .expect("flashtask erase fail");
-                    self.flash
-                        .blocking_write(STORAGE_OFFSET, &buf)
-                        .expect("flashtask write fail");
+                SyncStorageStateEnum::WritePid {
+                    pid,
+                    pid_p,
+                    pid_i,
+                    pid_d,
+                } => {
+                    self.storage.pid_p = pid_p;
+                    self.storage.pid_i = pid_i;
+                    self.storage.pid_d = pid_d;
+                    self.storage.pid = pid;
+                }
+                SyncStorageStateEnum::WriteTempSettings {
+                    wait_time,
+                    extra_time,
+                    temp_lead_offset,
+                    temp_offset,
+                } => {
+                    self.storage.temp_wait_time = wait_time;
+                    self.storage.temp_extra_time = extra_time;
+                    self.storage.temp_lead_offset = temp_lead_offset;
+                    self.storage.temp_offset = temp_offset;
                 }
             }
+
+            let mut buf = [0; STORAGE_SIZE as usize];
+
+            bincode::encode_into_slice(&self.storage, &mut buf, BINCODE_CONFIG)
+                .expect("flashtask enc fail");
+
+            self.flash
+                .blocking_erase(STORAGE_OFFSET, STORAGE_OFFSET + STORAGE_SIZE)
+                .expect("flashtask erase fail");
+            self.flash
+                .blocking_write(STORAGE_OFFSET, &buf)
+                .expect("flashtask write fail");
         }
     }
 }

@@ -13,7 +13,7 @@ use crate::{channels, select, temperature};
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum SyncDisplayStateEnum {
-    Status(StaticString<60>),
+    Status(StaticString<100>),
     CurrTemp(u16),
     PeakTargetTemp(u16, temperature::TemperatureProfileEnum),
     CurrTargetTemp(u16),
@@ -53,7 +53,7 @@ impl<'a> Display<'a> {
             .text_color(embedded_graphics::pixelcolor::BinaryColor::On)
             .build();
 
-        let mut second_line: StaticString<60> = format_static!("Welcome!");
+        let mut second_line: StaticString<100> = format_static!("Welcome!");
 
         let mut curr_temp: StaticString<5> = format_static!("???");
         let mut curr_target_temp: StaticString<3> = format_static!("000");

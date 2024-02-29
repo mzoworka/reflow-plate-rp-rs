@@ -12,7 +12,18 @@ use crate::{channels, select, storage, temperature, SyncStateChannelSender};
 #[derive(Debug, PartialEq)]
 pub(crate) enum SyncHeatStateEnum {
     TargetTemp(u16, temperature::TemperatureProfileEnum),
-    Pid((bool, f32, f32, f32)),
+    Pid {
+        pid: bool,
+        pid_p: f32,
+        pid_i: f32,
+        pid_d: f32,
+    },
+    TempSettings {
+        wait_time: f32,
+        extra_time: f32,
+        temp_lead_offset: i16,
+        temp_offset: i16,
+    },
 }
 
 pub(crate) struct Heater<'a> {
@@ -46,6 +57,10 @@ impl<'a> Heater<'a> {
             target_temp: temperature::TemperatureProfile::new(
                 0,
                 temperature::TemperatureProfileEnum::Static,
+                startup_storage.temp_wait_time,
+                startup_storage.temp_extra_time,
+                startup_storage.temp_lead_offset,
+                startup_storage.temp_offset,
             ),
             pid_use: startup_storage.pid,
             pid_p: startup_storage.pid_p,
@@ -84,15 +99,33 @@ impl<'a> Heater<'a> {
                         self.target_temp.reset();
                         self.controller.reset();
                     }
-                    SyncHeatStateEnum::Pid(x) => {
-                        self.pid_use = x.0;
-                        self.pid_p = x.1;
-                        self.pid_i = x.2;
-                        self.pid_d = x.3;
+                    SyncHeatStateEnum::Pid {
+                        pid,
+                        pid_p,
+                        pid_i,
+                        pid_d,
+                    } => {
+                        self.pid_use = pid;
+                        self.pid_p = pid_p;
+                        self.pid_i = pid_i;
+                        self.pid_d = pid_d;
                         self.controller.set_proportional_gain(self.pid_p as f64);
                         self.controller.set_integral_gain(self.pid_i as f64);
                         self.controller.set_derivative_gain(self.pid_d as f64);
                         self.controller.reset();
+                    }
+                    SyncHeatStateEnum::TempSettings {
+                        wait_time,
+                        extra_time,
+                        temp_lead_offset,
+                        temp_offset,
+                    } => {
+                        self.target_temp.set_settings(
+                            wait_time,
+                            extra_time,
+                            temp_lead_offset,
+                            temp_offset,
+                        );
                     }
                 },
                 embassy_futures::select::Either::Second(()) => {}
