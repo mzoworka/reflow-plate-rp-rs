@@ -1,5 +1,9 @@
 use core::time::Duration;
 
+const RUNAWAY_TARGET_TEMP_THRESHOLD: u16 = 1;
+const RUNAWAY_TEMP_THRESHOLD: u16 = 2;
+const RUNAWAY_INTERVAL: f32 = 5.0;
+
 #[repr(u8)]
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum TemperatureProfileEnum {
@@ -33,6 +37,10 @@ pub struct TemperatureProfile {
     temp_extra_time: f32,
     temp_lead_offset: i16,
     temp_offset: i16,
+    curr_max_temp: u16,
+    last_target: u16,
+    last_max: u16,
+    last_period: f32,
 }
 
 impl TemperatureProfile {
@@ -55,6 +63,10 @@ impl TemperatureProfile {
             temp_extra_time,
             temp_lead_offset,
             temp_offset,
+            curr_max_temp: 0,
+            last_target: 0,
+            last_max: 0,
+            last_period: 0.0,
         }
     }
 
@@ -84,13 +96,19 @@ impl TemperatureProfile {
         self.state = TemperatureProfileState::FirstRamp;
         self.state_start = 0.0;
         self.temperature = 0;
+        self.last_target = 0;
+        self.last_period = 0.0;
+        self.last_max = 0;
+        self.curr_max_temp = 0;
     }
 
     pub fn get_current_target(&mut self) -> u16 {
-        match self.profile {
+        self.last_target = match self.profile {
             TemperatureProfileEnum::Static => self.get_current_target_static(),
             TemperatureProfileEnum::ProfileA => self.get_current_target_prof_a(),
-        }
+        };
+
+        self.last_target
     }
 
     fn get_current_target_static(&self) -> u16 {
@@ -211,5 +229,29 @@ impl TemperatureProfile {
     pub fn update(&mut self, duration: Duration, curr_temp: u16) {
         self.time += duration.as_millis() as f32 / 1000.0;
         self.temperature = curr_temp;
+        if self.temperature > self.curr_max_temp {
+            self.curr_max_temp =
+                ((self.temperature as f32 * 0.9) + (self.curr_max_temp as f32 * 0.1)) as u16;
+        }
+        self.check_thermal_runaway();
+    }
+
+    fn check_thermal_runaway(&mut self) {
+        if self.temperature + RUNAWAY_TARGET_TEMP_THRESHOLD < self.last_target {
+            if self.time - self.last_period >= RUNAWAY_INTERVAL {
+                if self.curr_max_temp < self.last_max + RUNAWAY_TEMP_THRESHOLD {
+                    panic!(
+                        "Thermal runaway!\n{:03} < {:03}",
+                        self.curr_max_temp,
+                        self.last_max + RUNAWAY_TEMP_THRESHOLD
+                    );
+                }
+                self.last_period = self.time;
+                self.last_max = self.curr_max_temp;
+            }
+        } else {
+            self.last_max = 0;
+            self.curr_max_temp = self.last_target;
+        }
     }
 }

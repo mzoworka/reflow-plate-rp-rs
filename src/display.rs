@@ -186,7 +186,12 @@ where
         let info_str_chunks = info_str.as_slice().chunks(20);
         let mut info_str_wrapped = StaticString::<128>::default();
         for chunk in info_str_chunks {
-            if info_str_wrapped.try_extend_from_slice(chunk).is_err() {
+            let it = chunk.iter().map(|x| match x {
+                b'\n' => b' ',
+                x => *x,
+            });
+
+            if info_str_wrapped.try_extend_from_iter(it).is_err() {
                 break;
             }
             if info_str_wrapped.try_extend_from_slice(b"\n").is_err() {
