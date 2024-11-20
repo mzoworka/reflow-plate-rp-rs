@@ -1,6 +1,13 @@
 #![no_std]
 #![no_main]
 
+use embassy_executor::Spawner;
+use embassy_rp::adc::{self, Adc, Channel, Config};
+use embassy_rp::gpio::{Input, Level, Output, Pull};
+use embassy_rp::peripherals::I2C0;
+use embassy_rp::pwm::{self, Pwm};
+use embassy_rp::{bind_interrupts, flash, i2c};
+
 mod channels;
 mod display;
 mod heater;
@@ -13,17 +20,11 @@ mod tools;
 mod watchdog;
 
 use display::print_low_level;
-use embassy_executor::Spawner;
-use embassy_rp::adc::{Adc, Channel, Config, InterruptHandler};
-use embassy_rp::gpio::{Input, Level, Output, Pull};
-use embassy_rp::peripherals::I2C0;
-use embassy_rp::pwm::{self, Pwm};
-use embassy_rp::{bind_interrupts, flash, i2c};
 use tools::{wait_for_each_state, SyncStateChannelSender};
 
 bind_interrupts!(struct Irqs {
     I2C0_IRQ => i2c::InterruptHandler<I2C0>;
-    ADC_IRQ_FIFO => InterruptHandler;
+    ADC_IRQ_FIFO => adc::InterruptHandler;
 });
 
 /**
@@ -56,7 +57,7 @@ async fn main_loop(_spawner: Spawner) -> ! {
     let startup_storage = storage::Storage::flash_read(&mut flash);
 
     let adc = Adc::new(peripherals.ADC, Irqs, Config::default());
-    let p26 = Channel::new_pin(peripherals.PIN_26, Pull::None);
+    let adc_p26 = Channel::new_pin(peripherals.PIN_26, Pull::None);
     let thermistor = thermistor::Thermistor::new_dyze500();
 
     let i2c0: i2c::I2c<'_, I2C0, i2c::Async> = i2c::I2c::new_async(
@@ -86,11 +87,18 @@ async fn main_loop(_spawner: Spawner) -> ! {
     let btn3 = Input::new(peripherals.PIN_4, Pull::Up);
 
     let channels = channels::Channels::new();
+
     let mut watchdog = watchdog::Watchdog::new(led, &channels);
     let mut storage = storage::Storage::new(&startup_storage, flash, &channels);
     let mut display = display::Display::new(ssd1306_display, &channels);
-    let mut heater =
-        heater::Heater::new(&startup_storage, adc, p26, &thermistor, mosfet, &channels);
+    let mut heater = heater::Heater::new(
+        &startup_storage,
+        adc,
+        adc_p26,
+        &thermistor,
+        mosfet,
+        &channels,
+    );
     let mut menu = menu::Menu::new(&startup_storage, btn1, btn2, btn3, &channels);
 
     let f1 = display.display_task();
