@@ -11,7 +11,7 @@ use ssd1306::mode::DisplayConfig;
 use crate::tools::SyncStateChannelReceiver;
 use crate::{channels, select, temperature};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub(crate) enum SyncDisplayStateEnum {
     Status(StaticString<100>),
     CurrTemp(u16),
@@ -182,7 +182,7 @@ where
             //ignore: draw text failed
         }
 
-        let info_str = info.to_static_string::<128>().unwrap_or_default();
+        let info_str = info.to_static_string::<512>().unwrap_or_default();
         let info_str_chunks = info_str.as_slice().chunks(20);
         let mut info_str_wrapped = StaticString::<128>::default();
         for chunk in info_str_chunks {

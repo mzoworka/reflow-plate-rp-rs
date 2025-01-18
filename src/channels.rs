@@ -1,9 +1,5 @@
 use crate::{
-    display::SyncDisplayStateEnum,
-    heater::SyncHeatStateEnum,
-    storage::SyncStorageStateEnum,
-    tools::{SyncStateChannel, SyncStateChannelReceiver, SyncStateChannelSender},
-    watchdog::SyncWdStateEnum,
+    display::SyncDisplayStateEnum, heater::SyncHeatStateEnum, menu::SyncMenuStateEnum, storage::SyncStorageStateEnum, tools::{SyncStateChannel, SyncStateChannelReceiver, SyncStateChannelSender}, watchdog::SyncWdStateEnum
 };
 
 pub(crate) struct Channels {
@@ -11,6 +7,7 @@ pub(crate) struct Channels {
     display: SyncStateChannel<SyncDisplayStateEnum>,
     heat: SyncStateChannel<SyncHeatStateEnum>,
     storage: SyncStateChannel<SyncStorageStateEnum>,
+    menu: SyncStateChannel<SyncMenuStateEnum>,
 }
 
 impl Channels {
@@ -20,6 +17,7 @@ impl Channels {
             display: SyncStateChannel::<SyncDisplayStateEnum>::new(),
             heat: SyncStateChannel::<SyncHeatStateEnum>::new(),
             storage: SyncStateChannel::<SyncStorageStateEnum>::new(),
+            menu: SyncStateChannel::<SyncMenuStateEnum>::new(),
         }
     }
 
@@ -54,4 +52,12 @@ impl Channels {
     pub fn get_storage_tx(&self) -> SyncStateChannelSender<'_, SyncStorageStateEnum> {
         self.storage.sender()
     }
+
+    pub fn get_menu_rx(&self) -> SyncStateChannelReceiver<'_, SyncMenuStateEnum> {
+        self.menu.receiver()
+    }
+
+    pub fn get_menu_tx(&self) -> SyncStateChannelSender<'_, SyncMenuStateEnum> {
+        self.menu.sender()
+    }    
 }

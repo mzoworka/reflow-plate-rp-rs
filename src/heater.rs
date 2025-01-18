@@ -9,7 +9,7 @@ use crate::tools::SyncStateChannelReceiver;
 use crate::watchdog::SyncWdStateEnum;
 use crate::{channels, select, storage, temperature, SyncStateChannelSender};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub(crate) enum SyncHeatStateEnum {
     TargetTemp(u16, temperature::TemperatureProfileEnum),
     Pid {
@@ -28,7 +28,7 @@ pub(crate) enum SyncHeatStateEnum {
 
 pub(crate) struct Heater<'a> {
     channel: SyncStateChannelReceiver<'a, SyncHeatStateEnum>,
-    target_temp: temperature::TemperatureProfile,
+    target_temp: temperature::TemperatureProfile<'a>,
     pid_use: bool,
     pid_p: f32,
     pid_i: f32,
@@ -61,6 +61,7 @@ impl<'a> Heater<'a> {
                 startup_storage.temp_extra_time,
                 startup_storage.temp_lead_offset,
                 startup_storage.temp_offset,
+                channels.get_menu_tx(),
             ),
             pid_use: startup_storage.pid,
             pid_p: startup_storage.pid_p,
@@ -142,8 +143,8 @@ impl<'a> Heater<'a> {
             let time_elapsed = embassy_time::Instant::now() - time_begin;
             if time_elapsed.as_millis() > 10 {
                 //calc corrections
-                self.target_temp.update(time_elapsed.into(), current_temp);
-                let current_temp_target = self.target_temp.get_current_target();
+                self.target_temp.update(time_elapsed.into(), current_temp, self.pwm_config.compare_a > 0);
+                let current_temp_target = self.target_temp.get_current_target().await;
                 self.pwm_config.compare_a = if !self.pid_use {
                     if current_temp < current_temp_target {
                         self.pwm_config.top
