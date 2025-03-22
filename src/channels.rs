@@ -1,5 +1,10 @@
 use crate::{
-    display::SyncDisplayStateEnum, heater::SyncHeatStateEnum, menu::SyncMenuStateEnum, storage::SyncStorageStateEnum, tools::{SyncStateChannel, SyncStateChannelReceiver, SyncStateChannelSender}, watchdog::SyncWdStateEnum
+    display::SyncDisplayStateEnum,
+    heater::SyncHeatStateEnum,
+    menu::SyncMenuStateEnum,
+    storage::SyncStorageStateEnum,
+    tools::{SyncStateChannel, SyncStateChannelReceiver, SyncStateChannelSender},
+    watchdog::SyncWdStateEnum,
 };
 
 pub(crate) struct Channels {
@@ -59,5 +64,5 @@ impl Channels {
 
     pub fn get_menu_tx(&self) -> SyncStateChannelSender<'_, SyncMenuStateEnum> {
         self.menu.sender()
-    }    
+    }
 }

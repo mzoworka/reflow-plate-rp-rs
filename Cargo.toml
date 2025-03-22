@@ -6,18 +6,18 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-embassy-embedded-hal = { version = "0.1.0", features = [] }
-embassy-sync = { version = "0.5.0", features = [] }
-embassy-executor = { version = "0.5.0", features = ["task-arena-size-32768", "arch-cortex-m", "executor-thread", "executor-interrupt",  "integrated-timers"] }
-embassy-time = { version = "0.3.0", features = [] }
-embassy-rp = { version = "0.1.0", features = [ "unstable-pac", "time-driver", "critical-section-impl", "intrinsics", "rom-v2-intrinsics", "run-from-ram"] }
-embassy-usb = { version = "0.1.0", features = [] }
-embassy-net = { version = "0.4.0", features = [ "tcp", "udp", "dhcpv4", "medium-ethernet"] }
-embassy-net-wiznet = { version = "0.1.0", features = [] }
+embassy-embedded-hal = { version = "0.3.0", features = [] }
+embassy-sync = { version = "0.6.2", features = [] }
+embassy-executor = { version = "0.7.0", features = ["task-arena-size-32768", "arch-cortex-m", "executor-thread", "executor-interrupt"] }
+embassy-time = { version = "0.4.0", features = [] }
+embassy-rp = { version = "0.3.0", features = [ "unstable-pac", "time-driver", "critical-section-impl", "intrinsics", "rom-v2-intrinsics", "run-from-ram", "rp2040"] }
+embassy-usb = { version = "0.4.0", features = [] }
+embassy-net = { version = "0.6.0", features = [ "tcp", "udp", "dhcpv4", "medium-ethernet"] }
+embassy-net-wiznet = { version = "0.2.0", features = [] }
 embassy-futures = { version = "0.1.0" }
-embassy-usb-logger = { version = "0.1.0" }
-cyw43 = { version = "0.1.0", features = [ "firmware-logs"] }
-cyw43-pio = { version = "0.1.0", features = [ "overclock"] }
+embassy-usb-logger = { version = "0.4.0" }
+cyw43 = { version = "0.3.0", features = [ "firmware-logs"] }
+cyw43-pio = { version = "0.3.0" }
 
 fixed = "1.23.1"
 fixed-macro = "1.2"
@@ -29,14 +29,14 @@ display-interface-spi = "0.5.0"
 embedded-graphics = "0.8.1"
 st7789 = "0.7.0"
 display-interface = "0.5.0"
-byte-slice-cast = { version = "1.2.0", default-features = false }
+byte-slice-cast = { version = "1.2.2", default-features = false }
 smart-leds = "0.4.0"
 heapless = "0.8"
-usbd-hid = "0.7.0"
+usbd-hid = "0.8.2"
 
 embedded-hal-1 = { package = "embedded-hal", version = "1.0" }
 embedded-hal-async = "1.0"
-embedded-hal-bus = { version = "0.1", features = ["async"] }
+embedded-hal-bus = { version = "0.2", features = ["async"] }
 embedded-io-async = { version = "0.6.1", features = [] }
 embedded-storage = { version = "0.3" }
 static_cell = "2"
@@ -51,7 +51,7 @@ bincode = { git = "ssh://git@github.com/bincode-org/bincode.git", version = "2.0
 
 simplestaticstring = { git = "ssh://git@github.com/mzoworka/simplestaticstring-rust.git" }
 ssd1306 = { version = "0.8.4" }
-pid-lite = { version = "1.2.0", default-features = false }
+pid-lite = { git = "ssh://git@github.com/mzoworka/pid-lite.git", version = "1.2.0", default-features = false }
 
 [profile.release]
 debug = 2

@@ -89,7 +89,9 @@ impl MenuItemActionTrait for MenuItemTargetTempProfileA {
                 MenuItemAction::None
             }
             2 => {
-                menu.profile.0 = temperature::TemperatureProfileEnum::ProfileA{state: Default::default()};
+                menu.profile.0 = temperature::TemperatureProfileEnum::ProfileA {
+                    state: Default::default(),
+                };
                 menu.profile.1 = true;
                 MenuItemAction::Back
             }
@@ -185,7 +187,9 @@ impl MenuItemTextTrait for MenuItemPidAutoTune {
     fn get(&self, menu: &Menu) -> StaticString<20> {
         match menu.pid_autotune_inprogress {
             PidAutoTuneInProgressEnum::Idle => format_static!("Start"),
-            PidAutoTuneInProgressEnum::InProgress => format_static!("Abort [{}]", menu.pid_autotune_iteration),
+            PidAutoTuneInProgressEnum::InProgress => {
+                format_static!("Abort [{}]", menu.pid_autotune_iteration)
+            }
             PidAutoTuneInProgressEnum::Done => format_static!("Close"),
         }
     }
@@ -200,10 +204,15 @@ impl MenuItemActionTrait for MenuItemPidAutoTune {
                     menu.pid_autotune_inprogress = PidAutoTuneInProgressEnum::InProgress;
 
                     menu.pid = (false, true);
-                    menu.profile = (TemperatureProfileEnum::AutoCalibrate { state: Default::default() }, true);
+                    menu.profile = (
+                        TemperatureProfileEnum::AutoCalibrate {
+                            state: Default::default(),
+                        },
+                        true,
+                    );
 
                     MenuItemAction::None
-                },
+                }
                 PidAutoTuneInProgressEnum::InProgress => {
                     menu.pid_autotune_inprogress = PidAutoTuneInProgressEnum::Idle;
 
@@ -212,11 +221,11 @@ impl MenuItemActionTrait for MenuItemPidAutoTune {
                     menu.target_temp = (0, true);
 
                     MenuItemAction::Back
-                },
+                }
                 PidAutoTuneInProgressEnum::Done => {
                     menu.pid_autotune_inprogress = PidAutoTuneInProgressEnum::Idle;
                     MenuItemAction::Back
-                },
+                }
             },
             3 => MenuItemAction::None,
             _ => MenuItemAction::None,
@@ -440,7 +449,6 @@ const MENU_PID_D: &MenuType = &[MenuItem {
     action: MenuItemAction::Custom(&MenuItemPidD {}),
 }];
 
-
 const MENU_PID_MANUAL: &MenuType = &[
     MenuItem {
         text: MenuItemText::Static("Set P"),
@@ -459,7 +467,6 @@ const MENU_PID_MANUAL: &MenuType = &[
         action: MenuItemAction::Back,
     },
 ];
-
 
 const MENU_PID_AUTOTUNE: &MenuType = &[
     MenuItem {
@@ -545,9 +552,9 @@ pub(crate) struct Menu<'a> {
     channel: SyncStateChannelReceiver<'a, SyncMenuStateEnum>,
     menu: &'static MenuType,
     position: u8,
-    btn1: Input<'a, embassy_rp::peripherals::PIN_2>,
-    btn2: Input<'a, embassy_rp::peripherals::PIN_3>,
-    btn3: Input<'a, embassy_rp::peripherals::PIN_4>,
+    btn1: Input<'a>,
+    btn2: Input<'a>,
+    btn3: Input<'a>,
     display_tx: SyncStateChannelSender<'a, SyncDisplayStateEnum>,
     heat_tx: SyncStateChannelSender<'a, SyncHeatStateEnum>,
     storage_tx: SyncStateChannelSender<'a, SyncStorageStateEnum>,
@@ -568,9 +575,9 @@ pub(crate) struct Menu<'a> {
 impl<'a> Menu<'a> {
     pub fn new(
         startup_storage: &storage::StorageData,
-        btn1: Input<'a, embassy_rp::peripherals::PIN_2>,
-        btn2: Input<'a, embassy_rp::peripherals::PIN_3>,
-        btn3: Input<'static, embassy_rp::peripherals::PIN_4>,
+        btn1: Input<'a>,
+        btn2: Input<'a>,
+        btn3: Input<'a>,
         channels: &'a channels::Channels,
     ) -> Self {
         Self {
@@ -806,7 +813,9 @@ impl<'a> Menu<'a> {
             let sel_fut = crate::select!(f1, f2, f3, f4, f5,);
             let action = match sel_fut.await {
                 embassy_futures::select::Either::First(embassy_futures::select::Either::First(
-                    embassy_futures::select::Either::First(embassy_futures::select::Either::First(()/*btn1*/)),
+                    embassy_futures::select::Either::First(embassy_futures::select::Either::First(
+                        (), /*btn1*/
+                    )),
                 )) => {
                     if last_action != 0 {
                         0
@@ -815,9 +824,11 @@ impl<'a> Menu<'a> {
                         delay = DEFAULT_BTN_DELAY;
                         1
                     }
-                },
+                }
                 embassy_futures::select::Either::First(embassy_futures::select::Either::First(
-                    embassy_futures::select::Either::First(embassy_futures::select::Either::Second(()/*btn2*/)),
+                    embassy_futures::select::Either::First(
+                        embassy_futures::select::Either::Second(() /*btn2*/),
+                    ),
                 )) => {
                     if last_action != 0 {
                         0
@@ -826,10 +837,10 @@ impl<'a> Menu<'a> {
                         delay = DEFAULT_BTN_DELAY;
                         2
                     }
-                },
+                }
                 embassy_futures::select::Either::First(embassy_futures::select::Either::First(
-                    embassy_futures::select::Either::Second(()/*btn3*/)),
-                ) => {
+                    embassy_futures::select::Either::Second(() /*btn3*/),
+                )) => {
                     if last_action != 0 {
                         0
                     } else {
@@ -837,8 +848,10 @@ impl<'a> Menu<'a> {
                         delay = DEFAULT_BTN_DELAY;
                         3
                     }
-                },
-                embassy_futures::select::Either::First(embassy_futures::select::Either::Second(()/*delay*/)) => {
+                }
+                embassy_futures::select::Either::First(
+                    embassy_futures::select::Either::Second(() /*delay*/),
+                ) => {
                     let delay_action = if self.btn1.is_low() {
                         1
                     } else if self.btn2.is_low() {
@@ -865,27 +878,32 @@ impl<'a> Menu<'a> {
                     }
 
                     delay_action
-                },
+                }
                 embassy_futures::select::Either::Second(msg) => {
                     match msg {
-                        SyncMenuStateEnum::PidAutoTune { iteration, pid_p, pid_i, pid_d, done } => {
-                            self.pid = (true, true);
+                        SyncMenuStateEnum::PidAutoTune {
+                            iteration,
+                            pid_p,
+                            pid_i,
+                            pid_d,
+                            done,
+                        } => {
                             self.pid_autotune_iteration = iteration;
                             self.pid_p = (pid_p, true);
                             self.pid_i = (pid_i, true);
                             self.pid_d = (pid_d, true);
                             if done {
+                                self.pid = (true, true);
                                 self.profile = (TemperatureProfileEnum::Static, true);
                                 self.target_temp = (0, true);
                                 self.pid_autotune_inprogress = PidAutoTuneInProgressEnum::Done;
                             }
-                        },
+                        }
                     };
                     self.send_updates(self.display_tx, self.heat_tx, self.storage_tx)
                         .await;
                     4
-                },
-                
+                }
             };
 
             Timer::at(debounce).await;
@@ -908,8 +926,8 @@ impl<'a> Menu<'a> {
                         .await;
                 }
                 3 => self.on_down(amount),
-                4 => {},
-                _ => {},
+                4 => {}
+                _ => {}
             };
 
             if action != 0 {

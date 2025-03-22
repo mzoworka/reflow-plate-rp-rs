@@ -76,7 +76,7 @@ async fn main_loop(_spawner: Spawner) -> ! {
     .into_buffered_graphics_mode();
 
     let mosfet = Pwm::new_output_a(
-        peripherals.PWM_CH3,
+        peripherals.PWM_SLICE3,
         peripherals.PIN_22,
         pwm::Config::default(),
     );

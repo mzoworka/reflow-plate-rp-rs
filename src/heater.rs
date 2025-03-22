@@ -1,6 +1,9 @@
+use core::cmp::{max, min};
+
 use embassy_rp::adc::{Adc, Channel};
 use embassy_rp::pwm::{self, Pwm};
 use embassy_time::Timer;
+use fixed::traits::ToFixed;
 use pid_lite::Controller;
 
 use crate::display::SyncDisplayStateEnum;
@@ -38,7 +41,7 @@ pub(crate) struct Heater<'a> {
     adc: Adc<'a, embassy_rp::adc::Async>,
     adc_temp_ch: Channel<'a>,
     thermistor: &'a Thermistor,
-    mosfet: Pwm<'a, embassy_rp::peripherals::PWM_CH3>,
+    mosfet: Pwm<'a>,
     display_tx: SyncStateChannelSender<'a, SyncDisplayStateEnum>,
     wd_tx: SyncStateChannelSender<'a, SyncWdStateEnum>,
 }
@@ -49,10 +52,10 @@ impl<'a> Heater<'a> {
         adc: Adc<'a, embassy_rp::adc::Async>,
         adc_temp_ch: Channel<'a>,
         thermistor: &'a Thermistor,
-        mosfet: Pwm<'a, embassy_rp::peripherals::PWM_CH3>,
+        mosfet: Pwm<'a>,
         channels: &'a channels::Channels,
     ) -> Self {
-        Self {
+        let mut this = Self {
             channel: channels.get_heat_rx(),
             target_temp: temperature::TemperatureProfile::new(
                 0,
@@ -68,10 +71,10 @@ impl<'a> Heater<'a> {
             pid_i: startup_storage.pid_i,
             pid_d: startup_storage.pid_d,
             controller: Controller::new(
-                0 as f64,
-                startup_storage.pid_p as f64,
-                startup_storage.pid_i as f64,
-                startup_storage.pid_d as f64,
+                0.0f32,
+                startup_storage.pid_p,
+                startup_storage.pid_i,
+                startup_storage.pid_d,
             ),
             pwm_config: pwm::Config::default(),
             adc,
@@ -80,7 +83,12 @@ impl<'a> Heater<'a> {
             mosfet,
             display_tx: channels.get_display_tx(),
             wd_tx: channels.get_watchdog_tx(),
-        }
+        };
+
+        this.controller.set_error_sum_limits(Some(0.0), Some(1.0));
+        this.pwm_config.divider = 16.to_fixed();
+
+        this
     }
 
     pub async fn heat_task(&mut self) -> ! {
@@ -110,9 +118,9 @@ impl<'a> Heater<'a> {
                         self.pid_p = pid_p;
                         self.pid_i = pid_i;
                         self.pid_d = pid_d;
-                        self.controller.set_proportional_gain(self.pid_p as f64);
-                        self.controller.set_integral_gain(self.pid_i as f64);
-                        self.controller.set_derivative_gain(self.pid_d as f64);
+                        self.controller.set_proportional_gain(self.pid_p);
+                        self.controller.set_integral_gain(self.pid_i);
+                        self.controller.set_derivative_gain(self.pid_d);
                         self.controller.reset();
                     }
                     SyncHeatStateEnum::TempSettings {
@@ -132,21 +140,26 @@ impl<'a> Heater<'a> {
                 embassy_futures::select::Either::Second(()) => {}
             }
 
-            //read current temp
-            let temp_val = self
-                .adc
-                .read(&mut self.adc_temp_ch)
-                .await
-                .expect("heat_task: temp fail");
-            let current_temp = self.thermistor.calc_temp(temp_val) as u16;
-
             let time_elapsed = embassy_time::Instant::now() - time_begin;
             if time_elapsed.as_millis() > 10 {
+                //read current temp
+                let temp_val = self
+                    .adc
+                    .read(&mut self.adc_temp_ch)
+                    .await
+                    .expect("heat_task: temp fail");
+                let current_temp = self.thermistor.calc_temp(temp_val);
+                let current_temp_u16 = current_temp as u16;
+
                 //calc corrections
-                self.target_temp.update(time_elapsed.into(), current_temp, self.pwm_config.compare_a > 0);
+                self.target_temp.update(
+                    time_elapsed.into(),
+                    current_temp_u16,
+                    self.pwm_config.compare_a > 0,
+                );
                 let current_temp_target = self.target_temp.get_current_target().await;
                 self.pwm_config.compare_a = if !self.pid_use {
-                    if current_temp < current_temp_target {
+                    if current_temp_u16 < current_temp_target {
                         self.pwm_config.top
                     } else {
                         0
@@ -154,12 +167,16 @@ impl<'a> Heater<'a> {
                 } else {
                     if current_temp_target != last_temp_target {
                         last_temp_target = current_temp_target;
-                        self.controller.set_target(current_temp_target as f64);
+                        self.controller.set_target(current_temp_target as f32);
                         self.controller.reset();
                     }
-                    self.controller
-                        .update_elapsed(current_temp as f64, time_elapsed.into())
-                        as u16
+
+                    let raw = self
+                        .controller
+                        .update_elapsed(current_temp, time_elapsed.into())
+                        * self.pwm_config.top as f32;
+
+                    max(0, min(raw as u16, self.pwm_config.top))
                 };
 
                 //set mosfet
@@ -170,7 +187,7 @@ impl<'a> Heater<'a> {
                 //send updates
                 if self
                     .display_tx
-                    .try_send(SyncDisplayStateEnum::CurrTemp(current_temp))
+                    .try_send(SyncDisplayStateEnum::CurrTemp(current_temp_u16))
                     .is_err()
                 {
                     //ignore: msg dropped
@@ -191,12 +208,12 @@ impl<'a> Heater<'a> {
                 {
                     //ignore: msg dropped
                 }
-            }
 
-            //feed wd
-            self.wd_tx
-                .try_send(SyncWdStateEnum::HeatTask)
-                .expect("heat_task: wdtx fail");
+                //feed wd
+                self.wd_tx
+                    .try_send(SyncWdStateEnum::HeatTask)
+                    .expect("heat_task: wdtx fail");
+            }
         }
     }
 }

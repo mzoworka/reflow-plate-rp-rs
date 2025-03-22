@@ -1,4 +1,7 @@
-use core::{fmt::Display, sync::atomic::{AtomicBool, Ordering}};
+use core::{
+    fmt::Display,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 struct PanicInfoWrap<'a>(&'a core::panic::PanicInfo<'a>);
 
@@ -7,7 +10,17 @@ impl Display for PanicInfoWrap<'_> {
         f.write_str("panic: ")?;
         self.0.message().fmt(f)?;
         f.write_str("@\n")?;
-        self.0.location().map(|loc| {let filename = loc.file(); let len = if filename.len() > 50 {50} else {filename.len()}; f.write_str(&filename[filename.len()-len..])?; f.write_str(":")?; loc.line().fmt(f)});        
+        self.0.location().map(|loc| {
+            let filename = loc.file();
+            let len = if filename.len() > 50 {
+                50
+            } else {
+                filename.len()
+            };
+            f.write_str(&filename[filename.len() - len..])?;
+            f.write_str(":")?;
+            loc.line().fmt(f)
+        });
         Ok(())
     }
 }

@@ -10,14 +10,11 @@ pub(crate) enum SyncWdStateEnum {
 
 pub(crate) struct Watchdog<'a> {
     channel: SyncStateChannelReceiver<'a, SyncWdStateEnum>,
-    led: Output<'a, embassy_rp::peripherals::PIN_25>,
+    led: Output<'a>,
 }
 
 impl<'a> Watchdog<'a> {
-    pub fn new(
-        led: Output<'a, embassy_rp::peripherals::PIN_25>,
-        channels: &'a channels::Channels,
-    ) -> Self {
+    pub fn new(led: Output<'a>, channels: &'a channels::Channels) -> Self {
         Self {
             channel: channels.get_watchdog_rx(),
             led,

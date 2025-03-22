@@ -4,11 +4,15 @@ use micromath::F32Ext;
 
 use crate::{menu::SyncMenuStateEnum, tools::SyncStateChannelSender};
 
-const RUNAWAY_TARGET_TEMP_THRESHOLD: u16 = 1;
+const RUNAWAY_TARGET_TEMP_THRESHOLD: u16 = 5;
 const RUNAWAY_TEMP_THRESHOLD: u16 = 2;
+const RUNAWAY_INTERVAL: u16 = 5;
+const RUNAWAY_ERROR_MAX: f32 = 120.0;
+const RUNAWAY_CURR_ERROR_MAX: u16 = 50;
+
 const TUNE_PID_DELTA: u16 = 5;
-const RUNAWAY_INTERVAL: f32 = 5.0;
-const PID_PARAM_BASE: f32 = 255.0;
+const PID_FIRST_SAMPLE: u8 = 3;
+const PID_LAST_SAMPLE: u8 = 6;
 
 #[derive(Clone)]
 pub struct Hidden<T>(T);
@@ -22,8 +26,12 @@ impl<T> Debug for Hidden<T> {
 #[derive(Debug, Clone)]
 pub enum TemperatureProfileEnum {
     Static,
-    ProfileA{state: TemperatureProfileAState},
-    AutoCalibrate{state: TemperatureAutoCalibrateState},
+    ProfileA {
+        state: TemperatureProfileAState,
+    },
+    AutoCalibrate {
+        state: TemperatureAutoCalibrateState,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -51,11 +59,10 @@ impl Default for TemperatureProfileAState {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TemperatureAutoCalibrateState {
     FirstRamp,
-    PeakHeating{n: u8},
-    PeakCooling{n: u8},
+    PeakHeating { n: u8 },
+    PeakCooling { n: u8 },
     Cooldown,
 }
-
 
 impl Default for TemperatureAutoCalibrateState {
     fn default() -> Self {
@@ -69,6 +76,7 @@ pub struct TemperatureProfile<'a> {
     time: f32,
     state_start: f32,
     temperature: u16,
+    heating: bool,
     temp_wait_time: f32,
     temp_extra_time: f32,
     temp_lead_offset: i16,
@@ -77,21 +85,22 @@ pub struct TemperatureProfile<'a> {
     last_target: u16,
     last_max: u16,
     last_period: f32,
+    runaway_error: f32,
     temp_drop_peak: u16,
-    peaks: [(f32, f32);2],
+    peaks: [(f32, f32); 3],
     menu_tx: SyncStateChannelSender<'a, SyncMenuStateEnum>,
 }
 
 impl TemperatureProfileEnum {
     fn reset(&mut self) {
         match self {
-            TemperatureProfileEnum::Static => {},
-            TemperatureProfileEnum::ProfileA{ state } => {
+            TemperatureProfileEnum::Static => {}
+            TemperatureProfileEnum::ProfileA { state } => {
                 *state = TemperatureProfileAState::FirstRamp;
-            },
+            }
             TemperatureProfileEnum::AutoCalibrate { state } => {
                 *state = TemperatureAutoCalibrateState::FirstRamp;
-            },
+            }
         }
     }
 }
@@ -112,6 +121,7 @@ impl<'a> TemperatureProfile<'a> {
             time: 0.0,
             state_start: 0.0,
             temperature: 0,
+            heating: false,
             temp_wait_time,
             temp_extra_time,
             temp_lead_offset,
@@ -120,8 +130,9 @@ impl<'a> TemperatureProfile<'a> {
             last_target: 0,
             last_max: 0,
             last_period: 0.0,
+            runaway_error: 0.0,
             temp_drop_peak: 0,
-            peaks: [(0.0, 0.0), (0.0, 0.0)],
+            peaks: [(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)],
             menu_tx,
         }
     }
@@ -154,6 +165,7 @@ impl<'a> TemperatureProfile<'a> {
         self.temperature = 0;
         self.last_target = 0;
         self.last_period = 0.0;
+        self.runaway_error = 0.0;
         self.last_max = 0;
         self.curr_max_temp = 0;
     }
@@ -161,8 +173,8 @@ impl<'a> TemperatureProfile<'a> {
     pub async fn get_current_target(&mut self) -> u16 {
         self.last_target = match &self.profile {
             TemperatureProfileEnum::Static => self.get_current_target_static(),
-            TemperatureProfileEnum::ProfileA{..} => self.get_current_target_prof_a(),
-            TemperatureProfileEnum::AutoCalibrate{..} => self.get_current_autocalibrate().await,
+            TemperatureProfileEnum::ProfileA { .. } => self.get_current_target_prof_a(),
+            TemperatureProfileEnum::AutoCalibrate { .. } => self.get_current_autocalibrate().await,
         };
 
         self.last_target
@@ -174,7 +186,7 @@ impl<'a> TemperatureProfile<'a> {
 
     fn get_current_target_prof_a(&mut self) -> u16 {
         match &mut self.profile {
-            TemperatureProfileEnum::ProfileA{state} => match state {
+            TemperatureProfileEnum::ProfileA { state } => match state {
                 TemperatureProfileAState::FirstRamp => {
                     if self.time >= 38.0 {
                         *state = TemperatureProfileAState::FirstRampSync;
@@ -183,7 +195,7 @@ impl<'a> TemperatureProfile<'a> {
                     ((self.time * 4.0) as u16)
                         .saturating_add_signed(self.temp_lead_offset)
                         .saturating_add_signed(self.temp_offset) //time: 0..38 => temp: 0..152
-                },
+                }
                 TemperatureProfileAState::FirstRampSync => {
                     if self.time >= self.state_start + self.temp_wait_time
                         || self.temperature >= 150u16.saturating_add_signed(self.temp_offset)
@@ -194,7 +206,7 @@ impl<'a> TemperatureProfile<'a> {
                     150u16
                         .saturating_add_signed(self.temp_lead_offset)
                         .saturating_add_signed(self.temp_offset)
-                },
+                }
                 TemperatureProfileAState::FirstRampExtra => {
                     if self.time >= self.state_start + self.temp_extra_time {
                         *state = TemperatureProfileAState::PreHeat;
@@ -203,7 +215,7 @@ impl<'a> TemperatureProfile<'a> {
                     150u16
                         .saturating_add_signed(self.temp_lead_offset)
                         .saturating_add_signed(self.temp_offset)
-                },
+                }
                 TemperatureProfileAState::PreHeat => {
                     if self.time >= self.state_start + 80.0 {
                         *state = TemperatureProfileAState::PreHeatExtra;
@@ -213,7 +225,7 @@ impl<'a> TemperatureProfile<'a> {
                     (150 + (diff * 30.0 / 80.0) as u16)
                         .saturating_add_signed(self.temp_lead_offset)
                         .saturating_add_signed(self.temp_offset) //time: 38..120 => temp: 150..180
-                },
+                }
                 TemperatureProfileAState::PreHeatExtra => {
                     if self.time >= self.state_start + self.temp_extra_time {
                         *state = TemperatureProfileAState::SecondRamp;
@@ -222,7 +234,7 @@ impl<'a> TemperatureProfile<'a> {
                     180u16
                         .saturating_add_signed(self.temp_lead_offset)
                         .saturating_add_signed(self.temp_offset)
-                },
+                }
                 TemperatureProfileAState::SecondRamp => {
                     if self.time >= self.state_start + 13.0 {
                         *state = TemperatureProfileAState::SecondRampSync;
@@ -232,7 +244,7 @@ impl<'a> TemperatureProfile<'a> {
                     (180 + (diff * 40.0 / 13.0) as u16)
                         .saturating_add_signed(self.temp_lead_offset)
                         .saturating_add_signed(self.temp_offset) //time: 120..133 => temp: 180..220
-                },
+                }
                 TemperatureProfileAState::SecondRampSync => {
                     if self.time >= self.state_start + self.temp_wait_time
                         || self.temperature >= 220u16.saturating_add_signed(self.temp_offset)
@@ -241,14 +253,14 @@ impl<'a> TemperatureProfile<'a> {
                         self.state_start = self.time;
                     }
                     220u16.saturating_add_signed(self.temp_lead_offset)
-                },
+                }
                 TemperatureProfileAState::SecondRampExtra => {
                     if self.time >= self.state_start + self.temp_extra_time {
                         *state = TemperatureProfileAState::PeakRamp;
                         self.state_start = self.time;
                     }
                     220u16.saturating_add_signed(self.temp_lead_offset)
-                },
+                }
                 TemperatureProfileAState::PeakRamp => {
                     if self.time >= self.state_start + 20.0 {
                         *state = TemperatureProfileAState::PeakRampSync;
@@ -263,7 +275,7 @@ impl<'a> TemperatureProfile<'a> {
                         .saturating_add_signed(self.temp_lead_offset)
                         .saturating_add_signed(self.temp_offset)
                     //time: 133..153 => temp: 220..peak
-                },
+                }
                 TemperatureProfileAState::PeakRampSync => {
                     if self.time >= self.state_start + self.temp_wait_time
                         || self.temperature >= self.peak.saturating_add_signed(self.temp_offset)
@@ -272,14 +284,14 @@ impl<'a> TemperatureProfile<'a> {
                         self.state_start = self.time;
                     }
                     self.peak.saturating_add_signed(self.temp_offset)
-                },
+                }
                 TemperatureProfileAState::PeakRampExtra => {
                     if self.time >= self.state_start + self.temp_extra_time {
                         *state = TemperatureProfileAState::Cooldown;
                         self.state_start = self.time;
                     }
                     self.peak.saturating_add_signed(self.temp_offset)
-                },
+                }
                 TemperatureProfileAState::Cooldown => 0,
             },
             _ => panic!("wrong profile, expected profileA"),
@@ -291,88 +303,90 @@ impl<'a> TemperatureProfile<'a> {
             TemperatureProfileEnum::AutoCalibrate { state } => {
                 let menu_tx = self.menu_tx;
                 match *state {
-                TemperatureAutoCalibrateState::FirstRamp => {
-                    if self.temperature >= self.peak {
-                        self.temp_drop_peak = u16::MAX;
-                        *state = TemperatureAutoCalibrateState::PeakCooling{n: 0};
-                    }
-                    self.peak
-                },
-                TemperatureAutoCalibrateState::PeakHeating{ n } => {
-                    if self.temperature >= self.peak {
-                        self.peaks[0] = self.peaks[1];
-                        self.peaks[1].0 = self.temp_drop_peak.into();
-                        self.peaks[1].1 = self.time;
-                        self.temp_drop_peak = 0;
-                        let next_state = if n >= 12 {
-                            TemperatureAutoCalibrateState::Cooldown
-                        } else {
-                            TemperatureAutoCalibrateState::PeakCooling{n}
-                        };
-
-                        *state = next_state.clone();
-
-                        if n >= 4 {
-                            let pid = self.calc_pid();
-                            menu_tx.send(
-                                SyncMenuStateEnum::PidAutoTune {
-                                    iteration: n,
-                                    pid_p: pid.0, 
-                                    pid_i: pid.1, 
-                                    pid_d: pid.2, 
-                                    done: next_state == TemperatureAutoCalibrateState::Cooldown,
-                                }
-                            ).await;
+                    TemperatureAutoCalibrateState::FirstRamp => {
+                        if self.temperature >= self.peak {
+                            self.temp_drop_peak = u16::MAX;
+                            *state = TemperatureAutoCalibrateState::PeakCooling { n: 0 };
                         }
+                        self.peak
+                    }
+                    TemperatureAutoCalibrateState::PeakHeating { n } => {
+                        if !self.heating && self.temperature >= self.peak {
+                            self.peaks[0] = self.peaks[1];
+                            self.peaks[1] = self.peaks[2];
+                            self.peaks[2].0 = self.temp_drop_peak.into();
+                            self.peaks[2].1 = self.time;
+                            self.temp_drop_peak = 0;
+                            let next_state = if n >= PID_LAST_SAMPLE {
+                                TemperatureAutoCalibrateState::Cooldown
+                            } else {
+                                TemperatureAutoCalibrateState::PeakCooling { n }
+                            };
 
-                    } else if self.temperature < self.temp_drop_peak {
-                        self.temp_drop_peak = self.temperature;
-                    }
-                    self.peak
-                },
-                TemperatureAutoCalibrateState::PeakCooling{ n } => {
-                    if self.temperature <= self.peak - TUNE_PID_DELTA {
-                        self.peaks[0] = self.peaks[1];
-                        self.peaks[1].0 = self.temp_drop_peak.into();
-                        self.peaks[1].1 = self.time;
-                        self.temp_drop_peak = u16::MAX;
-                        *state = TemperatureAutoCalibrateState::PeakHeating{n: n + 1};
-                        if n >= 4 {
-                            let pid = self.calc_pid();
-                            menu_tx.send(
-                                SyncMenuStateEnum::PidAutoTune {
-                                    iteration: n,
-                                    pid_p: pid.0, 
-                                    pid_i: pid.1, 
-                                    pid_d: pid.2, 
-                                    done: false,
-                                }
-                            ).await;
+                            *state = next_state.clone();
+
+                            if n >= PID_FIRST_SAMPLE {
+                                let pid = self.calc_pid();
+                                menu_tx
+                                    .send(SyncMenuStateEnum::PidAutoTune {
+                                        iteration: n,
+                                        pid_p: pid.0,
+                                        pid_i: pid.1,
+                                        pid_d: pid.2,
+                                        done: next_state == TemperatureAutoCalibrateState::Cooldown,
+                                    })
+                                    .await;
+                            }
+                        } else if self.temperature < self.temp_drop_peak {
+                            self.temp_drop_peak = self.temperature;
                         }
-                    } else if self.temperature > self.temp_drop_peak {
-                        self.temp_drop_peak = self.temperature;
+                        self.peak
                     }
-                    self.peak - TUNE_PID_DELTA
-                },
-                TemperatureAutoCalibrateState::Cooldown => 0,
-            }},
+                    TemperatureAutoCalibrateState::PeakCooling { n } => {
+                        if self.heating && self.temperature <= self.peak - TUNE_PID_DELTA {
+                            self.peaks[0] = self.peaks[1];
+                            self.peaks[1] = self.peaks[2];
+                            self.peaks[2].0 = self.temp_drop_peak.into();
+                            self.peaks[2].1 = self.time;
+                            self.temp_drop_peak = u16::MAX;
+                            *state = TemperatureAutoCalibrateState::PeakHeating { n: n + 1 };
+                            if n >= PID_FIRST_SAMPLE {
+                                let pid = self.calc_pid();
+                                menu_tx
+                                    .send(SyncMenuStateEnum::PidAutoTune {
+                                        iteration: n,
+                                        pid_p: pid.0,
+                                        pid_i: pid.1,
+                                        pid_d: pid.2,
+                                        done: false,
+                                    })
+                                    .await;
+                            }
+                        } else if self.temperature > self.temp_drop_peak {
+                            self.temp_drop_peak = self.temperature;
+                        }
+                        self.peak - TUNE_PID_DELTA
+                    }
+                    TemperatureAutoCalibrateState::Cooldown => 0,
+                }
+            }
             _ => panic!("wrong profile, expected Autocalibrate"),
         }
     }
 
     fn calc_pid(&self) -> (f32, f32, f32) {
-        let temp_diff = self.peaks[1].0 - self.peaks[0].0;
-        let time_diff = self.peaks[1].1 - self.peaks[0].1;
-       
+        let temp_diff = self.peaks[2].0 - self.peaks[1].0;
+        let time_diff = self.peaks[2].1 - self.peaks[0].1;
+
         let amplitude = temp_diff.abs() * 0.5f32;
-       
+
         let ku = 4.0f32 * 1.0f32 / (PI * amplitude);
-       
+
         let tu = time_diff;
         let ti = 0.5f32 * tu;
         let td = 0.125f32 * tu;
-       
-        let kp = 0.6f32 * ku *  PID_PARAM_BASE;
+
+        let kp = 0.6f32 * ku;
         let ki = kp / ti;
         let kd = kp * td;
 
@@ -382,31 +396,49 @@ impl<'a> TemperatureProfile<'a> {
     pub fn update(&mut self, duration: Duration, curr_temp: u16, heating: bool) {
         self.time += duration.as_millis() as f32 / 1000.0;
         self.temperature = curr_temp;
+        self.heating = heating;
         if self.temperature > self.curr_max_temp {
             self.curr_max_temp =
                 ((self.temperature as f32 * 0.9) + (self.curr_max_temp as f32 * 0.1)) as u16;
         }
-        if heating && !matches!(self.profile, TemperatureProfileEnum::AutoCalibrate { .. }) {
-            self.check_thermal_runaway();
+        if !matches!(self.profile, TemperatureProfileEnum::AutoCalibrate { .. }) {
+            self.check_thermal_runaway(duration, heating);
         }
     }
 
-    fn check_thermal_runaway(&mut self) {
-        if self.temperature + RUNAWAY_TARGET_TEMP_THRESHOLD < self.last_target {
-            if self.time - self.last_period >= RUNAWAY_INTERVAL {
-                if self.curr_max_temp < self.last_max + RUNAWAY_TEMP_THRESHOLD {
-                    panic!(
-                        "Thermal runaway!\n{:03} < {:03}",
-                        self.curr_max_temp,
-                        self.last_max + RUNAWAY_TEMP_THRESHOLD
-                    );
+    fn check_thermal_runaway(&mut self, duration: Duration, heating: bool) {
+        if heating && self.temperature + RUNAWAY_TARGET_TEMP_THRESHOLD < self.last_target {
+            let goal = self.last_max + RUNAWAY_TEMP_THRESHOLD;
+            if self.curr_max_temp < goal {
+                let diff = goal - self.curr_max_temp;
+                let time_diff = (self.time - self.last_period) as u16;
+                self.runaway_error += diff as f32 * (duration.as_millis() as f32 / 1000.0);
+
+                if time_diff >= RUNAWAY_INTERVAL {
+                    if self.runaway_error >= RUNAWAY_ERROR_MAX {
+                        panic!(
+                            "Thermal runaway\nerr_sum: {:03}!\n{:03} < {:03}",
+                            self.runaway_error, self.curr_max_temp, goal
+                        );
+                    }
+                    if diff * time_diff >= RUNAWAY_CURR_ERROR_MAX {
+                        panic!(
+                            "Thermal runaway\nerr_curr {:03}!\n{:03} < {:03}",
+                            diff * time_diff,
+                            self.curr_max_temp,
+                            goal
+                        );
+                    }
                 }
+            } else {
+                self.runaway_error = 0.0;
                 self.last_period = self.time;
                 self.last_max = self.curr_max_temp;
             }
         } else {
+            self.runaway_error = 0.0;
+            self.last_period = self.time;
             self.last_max = 0;
-            self.curr_max_temp = self.last_target;
         }
     }
 }
